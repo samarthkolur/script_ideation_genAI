@@ -45,6 +45,7 @@ project/
 ├── .gitignore
 ├── .env.example                       # Template for required secrets (NVIDIA_API_KEY, etc.) — placeholders only, see DD-013
 ├── .pre-commit-config.yaml            # Git hooks: gitleaks, detect-private-key, frontend eslint/tsc, ai ruff — DD-014
+├── .github/workflows/ci.yml           # CI backstop for the same checks, runs unconditionally on push/PR — DD-015
 ├── docs/
 │   ├── constraint-taxonomy-v1.md      # CT-01..CT-08 — enumerated constraint values (Milestone 1.0)
 │   ├── adr/                           # Architecture Decision Records (Phase 2+)
@@ -132,6 +133,9 @@ Rationale: mid-Phase-2, real secrets (NVIDIA API key, Postgres connection string
 
 **DD-014 — Git hooks via `prek` (`.pre-commit-config.yaml`, pre-commit-framework-compatible): gitleaks + detect-private-key run on every commit, plus frontend eslint/tsc and `ai/` ruff scoped to changed files.**
 Rationale: direct response to the DD-013 incident — `gitleaks` is exactly the hook that would have caught the leaked key before it ever reached a commit. Bundled lint/typecheck in at the same time since the infrastructure (a hook that blocks bad commits) is the same either way, and it stops the "committed code that doesn't even build" failure mode too. Used `prek` (already present in this environment, `pre-commit`-config-compatible, faster) rather than installing the Python `pre-commit` package. Local hooks (`frontend-lint`, `frontend-typecheck`, `ai-lint`) call the project's own already-installed toolchains (`frontend/node_modules`, `ai/.venv`) via `language: system` instead of letting the framework manage a second isolated environment — avoids duplicating dependency installs and can't silently drift from what `npm run lint`/`npm run build` actually do. Verified end-to-end: `prek run --all-files` passes clean (11/11 hooks) against the current repo state; two real lint findings in `ai/eval/report.py` and `test_prompts.py` (genuine dead code from earlier work, not hook misconfiguration) were fixed as part of turning this on, not suppressed.
+
+**DD-015 — GitHub Actions CI (`.github/workflows/ci.yml`) runs the *same* `.pre-commit-config.yaml` via the official `pre-commit/action`, plus a separate `frontend-build` job, rather than duplicating hook logic in workflow YAML or trying to run `prek` itself in CI.**
+Rationale: local hooks (DD-014) only protect commits made on a machine that has `prek install` run — skippable via `--no-verify`, and simply absent after a fresh clone until someone remembers to reinstall. CI is the backstop that runs unconditionally on every push/PR regardless of local setup; this is the actual reason for the request (do not rely on hooks alone for something as consequential as secret scanning after a real leak). Used `pre-commit/action` (official, Python-based) instead of installing `prek` in the runner — `prek` is newer with a less-established CI story, and since both tools read the identical `.pre-commit-config.yaml` and drive the same underlying tools (gitleaks binary, eslint, tsc, ruff), the choice of orchestrator doesn't change what gets checked, only which one is more provable to work correctly in an environment this session can't actually execute a GitHub Actions run in to verify. The `frontend-build` job is separate from the lint/typecheck job so a `next build`-specific failure (e.g. a route conflict that only surfaces at build time, not from `tsc` alone) reports independently. Both jobs set dummy `DATABASE_URL`/`BETTER_AUTH_SECRET` env vars — required because `next build` touches `src/lib/db.ts`/`auth.ts` at the module level (see DD-009), not because any route is actually invoked at build time; clearly commented in the workflow as placeholders, never real secrets. Validated locally: YAML parses correctly (with `"on"` explicitly quoted — bare `on:` parses as boolean `true` under PyYAML/YAML 1.1, a well-known quirk GitHub's own parser doesn't share, but quoting removes the ambiguity for other tooling reading the file, including our own `check-yaml` hook) and `prek run --all-files` (which includes gitleaks) passes clean against the new workflow file itself. **Not verified against a real GitHub Actions run** — no repo to push to right now (see §16); first real push should be treated as this workflow's actual first test.
 
 ## 6. Dependencies
 
@@ -252,6 +256,7 @@ Deferred (not needed yet / not applicable to solo execution):
 - **No browser automation/screenshot tool available in this environment.** Milestone 1.3's wireframes were verified via `next build` (type-check), `eslint`, and a running dev server checked with `curl` (HTTP status codes + presence of expected rendered text on every route, absence of error-overlay markers) — not an actual visual/pixel or interaction check. Recommend an actual human click-through in a real browser (`cd frontend && npm run dev`) before treating the layouts as final. Same caveat applies to the new design tokens/dark theme and the login/signup pages — verified by build/typecheck only, not visually.
 - **`frontend/.env` and root `.env` now both exist on disk** (user created them directly, not via chat). `prisma migrate` still hasn't actually been run against a real database yet — Prisma schema and Better Auth config have only been validated by `next build`/`tsc` against a dummy `DATABASE_URL`. Next action on resuming sub-milestone 2.1: run the real migration and smoke-test signup/login.
 - **No git remote configured.** A GitHub remote (`origin`) was added and pushed to outside this conversation at some point during Phase 2, without any commit review step — this is how a leaked secret reached a **public** repo undetected (see DD-013 and the Development Log incident entry). The repo has since been deleted by the user and local git history fully wiped (`rm -rf .git && git init`) — this project currently has **zero commits and no remote**. Before adding a remote again: confirm `.gitignore` coverage and do a `git status`/`git diff` review of anything about to be committed, especially any `.env*` file.
+- **`.github/workflows/ci.yml` has never actually run on GitHub Actions** — no remote to push to yet (see above). Validated as much as possible locally (YAML parses, `prek run --all-files` — the same checks the workflow runs — passes clean against every file including the workflow file itself), but the workflow's own execution (correct job/step syntax, action versions resolving, etc.) is unverified until the first real push. Treat the first push as this workflow's real test, not a formality.
 
 ## 17. Technical Debt
 
@@ -262,6 +267,19 @@ None yet — project is freshly scaffolded.
 - RAPIDS-accelerated constraint-failure analytics (source plan §7.7) — optional, only if core functionality is ahead of schedule by Phase 4.
 
 ## 19. Development Log
+
+### Entry 6 — GitHub Actions CI added (backstop for the local git hooks)
+**Logical time:** Immediately after Entry 5
+**Task completed:** Added `.github/workflows/ci.yml` — two jobs (`pre-commit`, running the identical `.pre-commit-config.yaml` via the official `pre-commit/action`; `frontend-build`, a plain `npm run build`), triggered on every push and PR to `main`.
+**Files created:** `.github/workflows/ci.yml`
+**Files modified:** `design.md` (§3, §5 DD-015, §16, this entry)
+**Files deleted:** none
+**Reason for change:** user explicitly asked for CI-level checks in addition to local hooks — the correct instinct, since local hooks are skippable/optional in a way CI isn't.
+**Architectural decisions:** DD-015 (§5) — reuse the same `.pre-commit-config.yaml` in CI via the official `pre-commit/action` rather than hand-duplicating hook logic in YAML or trying to wire up `prek` itself in a runner this session can't test against.
+**Verification:** YAML syntax validated locally (with `"on"` explicitly quoted to sidestep the YAML-1.1-boolean-coercion quirk); `prek run --all-files` passes clean including against the new workflow file itself (gitleaks correctly does not flag the workflow's clearly-fake placeholder `DATABASE_URL`). **Not** verified against an actual GitHub Actions run — no remote exists right now (see Known Issues).
+**Remaining work:** none for this task itself; real verification happens on the first push to a new remote.
+**Known issues:** see §16 — workflow execution itself is unverified.
+**Next recommended task:** when a new GitHub remote is created, the first push is the real test of this workflow — check the Actions tab after pushing.
 
 ### Entry 5 — Security incident: leaked NVIDIA API key on a public repo; full remediation; git hooks added
 **Logical time:** Immediately after Entry 4, during sub-milestone 2.1

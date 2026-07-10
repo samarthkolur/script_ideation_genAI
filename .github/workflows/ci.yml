@@ -1,0 +1,83 @@
+# CI — the always-runs backstop for what .pre-commit-config.yaml checks
+# locally via `prek`. Local hooks can be skipped (--no-verify) or simply
+# never installed after a fresh clone; this workflow can't be skipped and
+# runs on every push/PR regardless of local setup. Added directly after the
+# credential-leak incident documented in design.md (DD-013/DD-014) — same
+# motivation, second layer.
+#
+# Two independent jobs so a lint failure doesn't block build feedback (or
+# vice versa) and both report separately in the PR checks list.
+
+name: CI
+
+"on":
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    name: Lint, typecheck & secret scan (pre-commit hooks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks scans history-aware; full history needed
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up ai/.venv (matches local dev — see .pre-commit-config.yaml's ai-lint hook)
+        run: |
+          python3 -m venv ai/.venv
+          ai/.venv/bin/pip install --quiet ruff
+
+      # Runs the exact same .pre-commit-config.yaml used locally via `prek`.
+      # This action uses the `pre-commit` Python package instead of `prek`
+      # for CI stability (official, widely-used action); both read the
+      # identical config format, so hook behavior is equivalent — see
+      # design.md DD-015 for the rationale.
+      - uses: pre-commit/action@v3.0.1
+
+  frontend-build:
+    name: Frontend production build
+    runs-on: ubuntu-latest
+    env:
+      # Build-time only — not real credentials. next build touches module-
+      # level code (src/lib/db.ts, src/lib/auth.ts) that requires these to
+      # be *set*, not valid, since no route is actually invoked at build
+      # time. Real secrets live only in each environment's own .env / host
+      # secret store, never here.
+      DATABASE_URL: "postgresql://user:pass@localhost:5432/db"
+      BETTER_AUTH_SECRET: "ci-build-placeholder-not-a-real-secret"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build
+        run: npm run build
+        working-directory: frontend
