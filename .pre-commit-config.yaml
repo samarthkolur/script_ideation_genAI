@@ -1,0 +1,60 @@
+# Git hook config, run by `prek` (https://prek.j178.dev) — a fast, drop-in
+# replacement for the Python `pre-commit` framework using the same config
+# format, already installed in this environment. `pre-commit` itself works
+# with this same file if `prek` isn't available elsewhere.
+#
+# Why this exists: added directly after a real incident (see design.md
+# DD-013 and the Development Log) where a live NVIDIA API key and a
+# Postgres connection string were pasted into tracked `.env.example`
+# template files and one was pushed to a public GitHub repo before anyone
+# caught it. `gitleaks` below is the hook that would have stopped that at
+# commit time — everything else (lint, typecheck) is normal hygiene bundled
+# in while setting this up.
+#
+# Setup: `prek install` (already run once for this repo; re-run after
+# cloning fresh). Run against everything at any time: `prek run --all-files`.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1000"]
+      - id: check-yaml
+      - id: mixed-line-ending
+      - id: detect-private-key
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  # Local hooks run the project's own toolchains (already installed in
+  # frontend/node_modules and ai/.venv) instead of pre-commit managing a
+  # second, separate environment — faster, and can't drift from `npm run
+  # build`/`npm run lint` behaving differently in CI vs. the hook.
+  - repo: local
+    hooks:
+      - id: frontend-lint
+        name: frontend — eslint
+        entry: bash -c 'cd frontend && npm run lint'
+        language: system
+        files: ^frontend/.*\.(ts|tsx|js|jsx|mjs|cjs)$
+        pass_filenames: false
+
+      - id: frontend-typecheck
+        name: frontend — tsc --noEmit
+        entry: bash -c 'cd frontend && npm run typecheck'
+        language: system
+        files: ^frontend/.*\.(ts|tsx)$
+        pass_filenames: false
+
+      - id: ai-lint
+        name: ai — ruff check
+        entry: bash -c 'ai/.venv/bin/ruff check ai/'
+        language: system
+        files: ^ai/.*\.py$
+        pass_filenames: false

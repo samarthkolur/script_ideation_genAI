@@ -1,0 +1,31 @@
+# --- Environment / secrets ---
+.env
+.env.local
+.env.*.local
+*.key
+
+# --- Node / Next.js (frontend/) ---
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.turbo/
+frontend/next-env.d.ts
+*.tsbuildinfo
+
+# --- Python (ai/) ---
+ai/.venv/
+ai/**/__pycache__/
+ai/**/*.pyc
+ai/.pytest_cache/
+ai/.mypy_cache/
+ai/.ruff_cache/
+
+# --- Evaluation outputs (regeneratable, large) ---
+docs/reports/raw/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

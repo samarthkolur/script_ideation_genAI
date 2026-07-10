@@ -1,0 +1,259 @@
+// Prisma schema for the PS241 BFF (Next.js). Postgres is the single source
+// of truth per the architecture redesign (see design.md DD-007..DD-010 and
+// the approved plan at /home/samarth/.claude/plans/foamy-tinkering-wreath.md).
+//
+// Better Auth owns the User/Session/Account/Verification shape below (kept
+// in sync manually with Better Auth's Prisma adapter expectations — see
+// src/lib/auth.ts). Do not rename these fields without checking Better
+// Auth's adapter requirements first.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Prisma 7: no `url` here — Migrate reads the connection from
+  // prisma.config.ts, and the runtime PrismaClient takes a driver
+  // `adapter` (see src/lib/db.ts) instead of a schema-level url.
+}
+
+// ---------------------------------------------------------------------------
+// Auth (Better Auth core tables, extended with our own relations below)
+// ---------------------------------------------------------------------------
+
+// User..Verification below match `npx @better-auth/cli generate` exactly
+// (verified against src/lib/auth.ts) — do not hand-edit field names/types
+// without re-running that CLI and diffing, since the Prisma adapter relies
+// on this exact shape.
+model User {
+  id            String   @id
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sessions        Session[]
+  accounts        Account[]
+  memberships     OrganizationMember[]
+  createdProjects Project[]            @relation("ProjectCreatedBy")
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+// ---------------------------------------------------------------------------
+// Product domain
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  plan      String   @default("free") // stub for future billing; no billing logic built yet
+  createdAt DateTime @default(now())
+
+  members  OrganizationMember[]
+  projects Project[]
+}
+
+model OrganizationMember {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  role           String   @default("owner") // owner | admin | member — only "owner" used until team collab ships
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+}
+
+model Project {
+  id             String    @id @default(cuid())
+  organizationId String
+  title          String
+  createdById    String
+  archivedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation("ProjectCreatedBy", fields: [createdById], references: [id])
+  briefs       Brief[]
+
+  @@index([organizationId])
+}
+
+model Brief {
+  id                  String   @id @default(cuid())
+  projectId           String
+  version             Int
+  genres              String[]
+  audience            String
+  budgetTier          String
+  runtimeMinutes      Int
+  region              String
+  language            String
+  censorshipFramework String
+  censorshipRating    String
+  locationType        String
+  castSize            String
+  vfxDependency       String
+  freeformNotes       String?
+  createdAt           DateTime @default(now())
+
+  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  generationRuns GenerationRun[]
+
+  @@unique([projectId, version])
+}
+
+model GenerationRun {
+  id           String    @id @default(cuid())
+  briefId      String
+  model        String
+  status       String    @default("queued") // queued | generating | complete | failed
+  errorMessage String?
+  startedAt    DateTime  @default(now())
+  completedAt  DateTime?
+
+  brief    Brief     @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  variants Variant[]
+
+  @@index([briefId])
+}
+
+model Variant {
+  id                     String   @id @default(cuid())
+  generationRunId        String
+  index                  Int
+  logline                String
+  threeActOutline        Json // { act1, act2, act3 }
+  characterArchetypes    String[]
+  centralConflict        String
+  productionComplexity   String // low | medium | high
+  estimatedLocations     Int
+  estimatedPrincipalCast Int
+  vfxLevelUsed           String
+  createdAt              DateTime @default(now())
+
+  generationRun       GenerationRun @relation(fields: [generationRunId], references: [id], onDelete: Cascade)
+  refinementsAsParent Refinement[]  @relation("RefinementParent")
+  refinementAsResult  Refinement?   @relation("RefinementResult")
+  exports             Export[]
+
+  @@index([generationRunId])
+}
+
+model Refinement {
+  id              String   @id @default(cuid())
+  parentVariantId String
+  instruction     String
+  resultVariantId String   @unique
+  createdAt       DateTime @default(now())
+
+  parent Variant @relation("RefinementParent", fields: [parentVariantId], references: [id], onDelete: Cascade)
+  result Variant @relation("RefinementResult", fields: [resultVariantId], references: [id], onDelete: Cascade)
+}
+
+model Export {
+  id        String   @id @default(cuid())
+  variantId String
+  format    String // pdf | text
+  fileUrl   String
+  createdAt DateTime @default(now())
+
+  variant Variant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+}
+
+// Constraint taxonomy (CT-01..CT-08), moved from hardcoded TS/Python files
+// into the DB — satisfies source-plan NFR-08 ("constraint config updatable
+// without code changes"). Seeded from docs/constraint-taxonomy-v1.md via
+// prisma/seed.ts; that markdown file remains the human-readable source of
+// truth, this table is its queryable form.
+model ConstraintOption {
+  id        String  @id @default(cuid())
+  dimension String // "genre" | "audience" | "budget_tier" | "region" | "language" | "censorship_framework" | "location_type" | "cast_size" | "vfx_dependency"
+  code      String
+  label     String
+  metadata  Json? // e.g. budget ceiling rules, framework rating lists, region->framework defaults
+  sortOrder Int
+  isActive  Boolean @default(true)
+
+  @@unique([dimension, code])
+}
+
+// Schema-ready, not built in v1 — exists so team collaboration and
+// analytics don't require a migration when they're prioritized later.
+model Comment {
+  id         String   @id @default(cuid())
+  targetType String // "project" | "variant"
+  targetId   String
+  authorId   String
+  body       String
+  createdAt  DateTime @default(now())
+
+  @@index([targetType, targetId])
+}
+
+model UsageEvent {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String?
+  eventType      String
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, eventType])
+}
