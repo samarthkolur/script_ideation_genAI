@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from .json_utils import parse_json_object
+
 from .nim_client import NimClient
 
 JUDGE_SYSTEM_PROMPT = (
@@ -88,8 +90,12 @@ async def judge_variant(
         ),
         temperature=0.1,
         json_mode=True,
+        # Same reasoning-token-budget issue as generation calls (see
+        # runner.py) — the judge model can also be a reasoning model that
+        # needs room to think before emitting the (small) scoring JSON.
+        max_tokens=4096,
     )
-    data = json.loads(result.content)
+    data = parse_json_object(result.content)
     return JudgeScore(
         genre_adherence=int(data["genre_adherence"]),
         audience_adherence=int(data["audience_adherence"]),

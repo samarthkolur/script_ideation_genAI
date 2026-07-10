@@ -21,6 +21,12 @@ load_dotenv()
 _DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 _MAX_RETRIES = 3
 _RETRY_BASE_DELAY_SECONDS = 2.0
+# NVIDIA's shared/free-tier hosted endpoint can queue requests server-side
+# under load (observed: 441 requests queued, ~67s for a 20-token
+# completion that's pure queue wait) rather than rejecting them — so this
+# needs to be generous enough to survive queuing, not just real inference
+# time for a ~2048-token generation call.
+_REQUEST_TIMEOUT_SECONDS = 180.0
 
 
 @dataclass(frozen=True)
@@ -41,7 +47,15 @@ class NimClient:
                 "project root and set your build.nvidia.com API key."
             )
         base_url = os.environ.get("NVIDIA_NIM_BASE_URL", _DEFAULT_BASE_URL)
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        # The SDK's default read timeout is 600s with its own internal
+        # retries on top — a single hung request could silently block for
+        # 20+ minutes before this class's own retry loop ever sees an
+        # error. Use a short client-side timeout and disable the SDK's
+        # built-in retries so _MAX_RETRIES/backoff below is the only retry
+        # policy in effect (single source of truth, and fails fast/loud).
+        self._client = AsyncOpenAI(
+            api_key=api_key, base_url=base_url, timeout=_REQUEST_TIMEOUT_SECONDS, max_retries=0
+        )
 
     async def chat(
         self,
