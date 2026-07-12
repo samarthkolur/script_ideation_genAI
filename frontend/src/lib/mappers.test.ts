@@ -121,13 +121,10 @@ describe("fromVariantPayload", () => {
       theme: SAMPLE_PAYLOAD.theme,
       emotionalCore: SAMPLE_PAYLOAD.emotional_core,
       worldBuilding: SAMPLE_PAYLOAD.world_building,
-      mainCharacters: SAMPLE_PAYLOAD.main_characters,
-      threeActStructure: SAMPLE_PAYLOAD.three_act_structure,
       majorPlotTwists: SAMPLE_PAYLOAD.major_plot_twists,
       characterRelationships: SAMPLE_PAYLOAD.character_relationships,
       visualStyle: SAMPLE_PAYLOAD.visual_style,
       cinematicReferences: SAMPLE_PAYLOAD.cinematic_references,
-      productionConsiderations: SAMPLE_PAYLOAD.production_considerations,
       constraintValidation: SAMPLE_PAYLOAD.constraint_validation,
       uniquenessNote: SAMPLE_PAYLOAD.uniqueness_note,
       centralConflict: SAMPLE_PAYLOAD.central_conflict,
@@ -136,12 +133,52 @@ describe("fromVariantPayload", () => {
       estimatedPrincipalCast: SAMPLE_PAYLOAD.estimated_principal_cast,
       vfxLevelUsed: SAMPLE_PAYLOAD.vfx_level_used,
       screenplayExcerpt: SAMPLE_PAYLOAD.screenplay_excerpt,
+      // Nested sub-objects (characters, act structure, production) must
+      // have their inner keys converted to camelCase too — Prisma's Json
+      // columns store exactly what's given, with no recursive case
+      // conversion, so a snake_case leak here would silently read as
+      // `undefined` everywhere the UI/export consumes it (a real bug
+      // caught this way during the screenplay-ideation redesign).
+      mainCharacters: [
+        {
+          name: "Dr. Rohan Patel",
+          age: "38",
+          motivation: "Understand human resilience",
+          internalConflict: "Fear of losing his grip on reality",
+          externalConflict: "The facility itself",
+          arc: "Confident to unraveling to changed",
+        },
+      ],
+      threeActStructure: {
+        act1: {
+          openingImage: "Wide shot of the wilderness",
+          incitingIncident: "He seals himself inside",
+          firstTurningPoint: "The first malfunction",
+        },
+        act2: {
+          risingConflict: "Malfunctions escalate",
+          midpoint: "He finds a hidden log",
+          complications: "His grip on reality slips",
+          lowestPoint: "Life support fails",
+        },
+        act3: {
+          climax: "He confronts the truth",
+          resolution: "He escapes, changed",
+          finalImage: "He looks back at the facility",
+        },
+      },
+      productionConsiderations: {
+        locations: "Single set, low cost",
+        vfx: "Minimal, practical",
+        cast: "One lead",
+        productionScale: "Small, tight schedule",
+      },
     });
   });
 });
 
 describe("toVariantPayload", () => {
-  it("is the exact inverse of fromVariantPayload for every field", () => {
+  it("is the exact inverse of fromVariantPayload for every field, including nested keys", () => {
     const roundTripped = toVariantPayload(fromVariantPayload(SAMPLE_PAYLOAD));
     expect(roundTripped).toEqual(SAMPLE_PAYLOAD);
   });
