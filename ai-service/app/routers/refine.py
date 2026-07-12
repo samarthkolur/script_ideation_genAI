@@ -11,7 +11,7 @@ router = APIRouter(dependencies=[Depends(verify_shared_secret)])
 
 @router.post("/internal/refine", response_model=RefineResponse)
 async def refine(request: RefineRequest) -> RefineResponse:
-    provider = get_provider()
+    provider = get_provider(request.provider)
     try:
         variant = await provider.refine(request.brief, request.variant, request.instruction)
     except Exception as exc:  # noqa: BLE001 - surfaced as a clean 502 to the BFF

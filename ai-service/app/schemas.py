@@ -49,6 +49,11 @@ class VariantOutput(BaseModel):
 class GenerateRequest(BaseModel):
     brief: BriefInput
     variant_count: int = Field(default=3, ge=1, le=6)
+    # Per-request override of the server's MODEL_PROVIDER default — the
+    # NVIDIA/Groq sidebar toggle (design.md Entry 19). None = use whatever
+    # MODEL_PROVIDER is configured in ai-service/.env (unchanged behavior
+    # for callers that predate the toggle, e.g. the eval harness).
+    provider: Literal["mock", "nim", "groq"] | None = None
 
 
 class GenerateResponse(BaseModel):
@@ -61,6 +66,7 @@ class RefineRequest(BaseModel):
     brief: BriefInput
     variant: VariantOutput
     instruction: str
+    provider: Literal["mock", "nim", "groq"] | None = None
 
 
 class RefineResponse(BaseModel):

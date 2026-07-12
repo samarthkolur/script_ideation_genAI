@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api-client";
+import { getModelProvider } from "@/lib/model-provider-store";
 import type { ApiVariant, ApiVariantDetail } from "@/lib/types";
 
 export function useVariant(id: string) {
@@ -18,7 +19,7 @@ export function useRefineVariant(variantId: string) {
     mutationFn: (instruction: string) =>
       apiFetch<ApiVariant>(`/api/variants/${variantId}/refine`, {
         method: "POST",
-        body: JSON.stringify({ instruction }),
+        body: JSON.stringify({ instruction, provider: getModelProvider() }),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["variants", variantId] });

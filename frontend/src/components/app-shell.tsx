@@ -33,6 +33,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { CommandPalette, CommandPaletteTrigger } from "@/components/command-palette";
+import { ModelProviderToggle } from "@/components/model-provider-toggle";
 import { useSession, signOut } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 
@@ -95,7 +96,8 @@ function SidebarBrand({ collapsed }: { collapsed: boolean }) {
 function SidebarFooter({ collapsed, onSignOut }: { collapsed: boolean; onSignOut: () => void }) {
   const { data: session } = useSession();
   return (
-    <div className="flex flex-col gap-2 border-t border-border pt-3">
+    <div className="flex flex-col gap-3 border-t border-border pt-3">
+      <ModelProviderToggle collapsed={collapsed} />
       <div className={cn("flex items-center gap-2 px-1", collapsed && "justify-center")}>
         <ThemeToggle />
         {!collapsed && session?.user && (

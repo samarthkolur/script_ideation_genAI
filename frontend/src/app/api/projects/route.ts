@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     });
 
     try {
-      const result = await generateVariants(toBriefPayload(brief));
+      const result = await generateVariants(toBriefPayload(brief), 3, body.brief.provider);
       await db.$transaction([
         db.generationRun.update({
           where: { id: run.id },

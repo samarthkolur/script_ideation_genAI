@@ -10,6 +10,12 @@
 
 import { z } from "zod";
 
+// The two providers exposed by the sidebar's NVIDIA/Groq toggle (design.md
+// Entry 19) — optional so requests from before the toggle existed (or any
+// caller that doesn't care) still validate; the route falls back to the AI
+// service's own MODEL_PROVIDER default when omitted.
+export const modelProviderSchema = z.enum(["nim", "groq"]).optional();
+
 export const briefInputSchema = z.object({
   genres: z.array(z.string().min(1)).min(1).max(2),
   audience: z.string().min(1),
@@ -23,6 +29,7 @@ export const briefInputSchema = z.object({
   castSize: z.string().min(1),
   vfxDependency: z.string().min(1),
   freeformNotes: z.string().max(500).optional(),
+  provider: modelProviderSchema,
 });
 export type BriefInputValues = z.infer<typeof briefInputSchema>;
 
@@ -34,6 +41,7 @@ export type CreateProjectValues = z.infer<typeof createProjectSchema>;
 
 export const refineVariantSchema = z.object({
   instruction: z.string().trim().min(1, "Describe what to change").max(500),
+  provider: modelProviderSchema,
 });
 export type RefineVariantValues = z.infer<typeof refineVariantSchema>;
 

@@ -18,6 +18,10 @@ export interface CreativeBrief {
   castSize: string;
   vfxDependency: string;
   freeformNotes?: string;
+  // Which model backend to generate with — the sidebar's NVIDIA/Groq toggle
+  // (design.md Entry 19). Optional: omitted means "use the AI service's
+  // configured default."
+  provider?: "nim" | "groq";
 }
 
 export interface ThreeActOutline {

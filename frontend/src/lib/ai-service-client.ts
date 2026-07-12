@@ -13,6 +13,14 @@ import { logger } from "@/lib/logger";
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL ?? "http://localhost:8000";
 const AI_SERVICE_SHARED_SECRET = process.env.AI_SERVICE_SHARED_SECRET;
 
+/**
+ * The two providers exposed by the sidebar's NVIDIA/Groq toggle (design.md
+ * Entry 19) — deliberately narrower than the AI service's own
+ * `Literal["mock", "nim", "groq"]`, since "mock" is a server-side/dev
+ * fallback, not something the public UI should be able to select.
+ */
+export type ModelProviderName = "nim" | "groq";
+
 export interface BriefPayload {
   genres: string[];
   audience: string;
@@ -80,17 +88,26 @@ async function callAiService<T>(path: string, body: unknown): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function generateVariants(brief: BriefPayload, variantCount = 3) {
+export function generateVariants(
+  brief: BriefPayload,
+  variantCount = 3,
+  provider?: ModelProviderName
+) {
   return callAiService<{ variants: VariantPayload[]; model: string; provider: string }>(
     "/internal/generate",
-    { brief, variant_count: variantCount }
+    { brief, variant_count: variantCount, ...(provider ? { provider } : {}) }
   );
 }
 
-export function refineVariant(brief: BriefPayload, variant: VariantPayload, instruction: string) {
+export function refineVariant(
+  brief: BriefPayload,
+  variant: VariantPayload,
+  instruction: string,
+  provider?: ModelProviderName
+) {
   return callAiService<{ variant: VariantPayload; model: string; provider: string }>(
     "/internal/refine",
-    { brief, variant, instruction }
+    { brief, variant, instruction, ...(provider ? { provider } : {}) }
   );
 }
 

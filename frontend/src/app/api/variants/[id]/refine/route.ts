@@ -17,13 +17,13 @@ export async function POST(request: Request, ctx: RouteContext<"/api/variants/[i
   try {
     const { organizationId } = await requireSession();
     const { id } = await ctx.params;
-    const { instruction } = refineVariantSchema.parse(await request.json());
+    const { instruction, provider } = refineVariantSchema.parse(await request.json());
 
     const parent = await findOrgScopedVariant(id, organizationId);
     if (!parent) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const brief = parent.generationRun.brief;
-    const result = await refineVariant(toBriefPayload(brief), toVariantPayload(parent), instruction);
+    const result = await refineVariant(toBriefPayload(brief), toVariantPayload(parent), instruction, provider);
 
     const created = await db.$transaction(async (tx) => {
       const resultVariant = await tx.variant.create({

@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api-client";
+import { getModelProvider } from "@/lib/model-provider-store";
 import type { ApiProject, CreativeBrief } from "@/lib/types";
 
 const PROJECTS_KEY = ["projects"] as const;
@@ -26,7 +27,13 @@ export function useCreateProject() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: { title: string; brief: CreativeBrief }) =>
-      apiFetch<ApiProject>("/api/projects", { method: "POST", body: JSON.stringify(input) }),
+      apiFetch<ApiProject>("/api/projects", {
+        method: "POST",
+        body: JSON.stringify({
+          ...input,
+          brief: { ...input.brief, provider: input.brief.provider ?? getModelProvider() },
+        }),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: PROJECTS_KEY });
     },
@@ -37,7 +44,10 @@ export function useCreateBrief(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (brief: CreativeBrief) =>
-      apiFetch(`/api/projects/${projectId}/briefs`, { method: "POST", body: JSON.stringify(brief) }),
+      apiFetch(`/api/projects/${projectId}/briefs`, {
+        method: "POST",
+        body: JSON.stringify({ ...brief, provider: brief.provider ?? getModelProvider() }),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: projectKey(projectId) });
       queryClient.invalidateQueries({ queryKey: PROJECTS_KEY });

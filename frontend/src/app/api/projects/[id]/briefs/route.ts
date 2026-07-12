@@ -45,7 +45,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/projects/[i
     });
 
     try {
-      const result = await generateVariants(toBriefPayload(brief));
+      const result = await generateVariants(toBriefPayload(brief), 3, body.provider);
       await db.$transaction([
         db.generationRun.update({
           where: { id: run.id },

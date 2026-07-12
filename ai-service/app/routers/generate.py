@@ -11,7 +11,7 @@ router = APIRouter(dependencies=[Depends(verify_shared_secret)])
 
 @router.post("/internal/generate", response_model=GenerateResponse)
 async def generate(request: GenerateRequest) -> GenerateResponse:
-    provider = get_provider()
+    provider = get_provider(request.provider)
     try:
         variants = await provider.generate(request.brief, request.variant_count)
     except Exception as exc:  # noqa: BLE001 - surfaced as a clean 502 to the BFF
