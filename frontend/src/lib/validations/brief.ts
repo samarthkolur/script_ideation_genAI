@@ -49,3 +49,9 @@ export const exportVariantSchema = z.object({
   format: z.enum(["pdf", "text"]),
 });
 export type ExportVariantValues = z.infer<typeof exportVariantSchema>;
+
+export const generateScreenplaySchema = z.object({
+  sceneTarget: z.number().int().min(2).max(10).optional(),
+  provider: modelProviderSchema,
+});
+export type GenerateScreenplayValues = z.infer<typeof generateScreenplaySchema>;

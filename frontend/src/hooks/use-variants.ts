@@ -28,6 +28,25 @@ export function useRefineVariant(variantId: string) {
   });
 }
 
+/** On-demand screenplay excerpt generation (design.md's screenplay-ideation
+ * redesign) — a separate action from refine, since it renders the existing
+ * story as formatted script pages rather than changing it. */
+export function useGenerateScreenplay(variantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sceneTarget?: number) =>
+      apiFetch<ApiVariant>(`/api/variants/${variantId}/screenplay`, {
+        method: "POST",
+        body: JSON.stringify({ sceneTarget, provider: getModelProvider() }),
+      }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["variants", variantId], (prev: ApiVariantDetail | undefined) =>
+        prev ? { ...prev, screenplayExcerpt: updated.screenplayExcerpt } : prev
+      );
+    },
+  });
+}
+
 /** Triggers a browser download directly — export isn't persisted server-side (design.md: no blob storage yet), so this is a fetch + blob download, not a query. */
 export async function exportVariant(variantId: string, format: "pdf" | "text") {
   const response = await fetch(`/api/variants/${variantId}/export`, {

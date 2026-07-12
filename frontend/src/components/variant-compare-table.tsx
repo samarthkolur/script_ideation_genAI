@@ -1,9 +1,10 @@
 /**
  * FR-06 — side-by-side comparison of all variants across structural
  * dimensions. Separate component from VariantCard because the comparison
- * view intentionally trims content (no full three-act text) to keep every
- * variant visible without horizontal scrolling for the plan's target of
- * up to 6 variants (AC-03).
+ * view intentionally trims content (no full development-document text) to
+ * keep every variant visible without horizontal scrolling for the plan's
+ * target of up to 5 variants (AC-03, tightened per design.md's
+ * screenplay-ideation redesign).
  */
 
 import Link from "next/link";
@@ -13,13 +14,17 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { ApiVariant } from "@/lib/types";
 
 const ROWS: { label: string; render: (v: ApiVariant) => React.ReactNode }[] = [
+  { label: "Working title", render: (v) => <span className="text-sm font-medium">{v.workingTitle}</span> },
+  { label: "Genre", render: (v) => <Badge variant="outline">{v.genre}</Badge> },
+  { label: "Tone", render: (v) => <span className="text-sm text-muted-foreground">{v.tone}</span> },
   { label: "Logline", render: (v) => <span className="text-sm">{v.logline}</span> },
+  { label: "Theme", render: (v) => <span className="text-sm text-muted-foreground">{v.theme}</span> },
   { label: "Central conflict", render: (v) => <span className="text-sm text-muted-foreground">{v.centralConflict}</span> },
   {
-    label: "Archetypes",
+    label: "Main characters",
     render: (v) => (
       <div className="flex flex-wrap gap-1">
-        {v.characterArchetypes.map((a) => <Badge key={a} variant="secondary" className="text-xs">{a}</Badge>)}
+        {v.mainCharacters.map((c) => <Badge key={c.name} variant="secondary" className="text-xs">{c.name}</Badge>)}
       </div>
     ),
   },
@@ -55,7 +60,7 @@ export function VariantCompareTable({ variants }: { variants: ApiVariant[] }) {
             {variants.map((v) => (
               <TableCell key={v.id}>
                 <Link href={`/variants/${v.id}`} className={buttonVariants({ size: "sm", variant: "secondary" })}>
-                  Open &amp; refine
+                  Open full treatment
                 </Link>
               </TableCell>
             ))}

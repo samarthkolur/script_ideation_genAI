@@ -65,8 +65,9 @@ export function RefinementPanel({ variantId }: { variantId: string }) {
           <Wand2 className="h-4 w-4" /> Refine this variant
         </CardTitle>
         <CardDescription>
-          Targeted changes only — the logline, structure, and characters stay intact unless your
-          instruction says otherwise.
+          Targeted changes only — theme, tone, world, and structural core stay intact unless your
+          instruction says otherwise. Creates a new version; any generated screenplay excerpt is
+          regenerated separately for it.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">

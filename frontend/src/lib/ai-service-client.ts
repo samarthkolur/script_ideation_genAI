@@ -36,21 +36,53 @@ export interface BriefPayload {
   freeform_notes?: string | null;
 }
 
-export interface ThreeActOutline {
-  act1: string;
-  act2: string;
-  act3: string;
+export interface MainCharacterPayload {
+  name: string;
+  age: string;
+  motivation: string;
+  internal_conflict: string;
+  external_conflict: string;
+  arc: string;
+}
+
+export interface ThreeActStructurePayload {
+  act1: { opening_image: string; inciting_incident: string; first_turning_point: string };
+  act2: { rising_conflict: string; midpoint: string; complications: string; lowest_point: string };
+  act3: { climax: string; resolution: string; final_image: string };
+}
+
+export interface ProductionConsiderationsPayload {
+  locations: string;
+  vfx: string;
+  cast: string;
+  production_scale: string;
 }
 
 export interface VariantPayload {
+  working_title: string;
+  genre: string;
+  tone: string;
+  target_audience: string;
   logline: string;
-  three_act_outline: ThreeActOutline;
-  character_archetypes: string[];
+  high_concept: string;
+  theme: string;
+  emotional_core: string;
+  world_building: string;
+  main_characters: MainCharacterPayload[];
+  three_act_structure: ThreeActStructurePayload;
+  major_plot_twists: string[];
+  character_relationships: string[];
+  visual_style: string;
+  cinematic_references: string[];
+  production_considerations: ProductionConsiderationsPayload;
+  constraint_validation: Record<string, string>;
+  uniqueness_note: string;
   central_conflict: string;
   production_complexity: "low" | "medium" | "high";
   estimated_locations: number;
   estimated_principal_cast: number;
   vfx_level_used: string;
+  screenplay_excerpt: string | null;
 }
 
 class AiServiceError extends Error {
@@ -115,5 +147,17 @@ export function validateVariant(brief: BriefPayload, variant: VariantPayload) {
   return callAiService<{ scores: Record<string, number>; mean_adherence: number; notes: string }>(
     "/internal/validate",
     { brief, variant }
+  );
+}
+
+export function generateScreenplay(
+  brief: BriefPayload,
+  variant: VariantPayload,
+  sceneTarget = 4,
+  provider?: ModelProviderName
+) {
+  return callAiService<{ screenplay_excerpt: string; model: string; provider: string }>(
+    "/internal/screenplay",
+    { brief, variant, scene_target: sceneTarget, ...(provider ? { provider } : {}) }
   );
 }

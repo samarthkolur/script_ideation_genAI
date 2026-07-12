@@ -24,10 +24,45 @@ export interface CreativeBrief {
   provider?: "nim" | "groq";
 }
 
-export interface ThreeActOutline {
-  act1: string;
-  act2: string;
-  act3: string;
+export interface MainCharacter {
+  name: string;
+  age: string;
+  motivation: string;
+  internalConflict: string;
+  externalConflict: string;
+  arc: string;
+}
+
+export interface ActOne {
+  openingImage: string;
+  incitingIncident: string;
+  firstTurningPoint: string;
+}
+
+export interface ActTwo {
+  risingConflict: string;
+  midpoint: string;
+  complications: string;
+  lowestPoint: string;
+}
+
+export interface ActThree {
+  climax: string;
+  resolution: string;
+  finalImage: string;
+}
+
+export interface ThreeActStructure {
+  act1: ActOne;
+  act2: ActTwo;
+  act3: ActThree;
+}
+
+export interface ProductionConsiderations {
+  locations: string;
+  vfx: string;
+  cast: string;
+  productionScale: string;
 }
 
 export type ProductionComplexity = "low" | "medium" | "high";
@@ -37,14 +72,30 @@ export interface ApiVariant {
   id: string;
   generationRunId: string;
   index: number;
+  workingTitle: string;
+  genre: string;
+  tone: string;
+  targetAudience: string;
   logline: string;
-  threeActOutline: ThreeActOutline;
-  characterArchetypes: string[];
+  highConcept: string;
+  theme: string;
+  emotionalCore: string;
+  worldBuilding: string;
+  mainCharacters: MainCharacter[];
+  threeActStructure: ThreeActStructure;
+  majorPlotTwists: string[];
+  characterRelationships: string[];
+  visualStyle: string;
+  cinematicReferences: string[];
+  productionConsiderations: ProductionConsiderations;
+  constraintValidation: Record<string, string>;
+  uniquenessNote: string;
   centralConflict: string;
   productionComplexity: ProductionComplexity;
   estimatedLocations: number;
   estimatedPrincipalCast: number;
   vfxLevelUsed: string;
+  screenplayExcerpt: string | null;
   createdAt: string;
 }
 

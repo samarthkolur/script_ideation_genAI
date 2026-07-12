@@ -51,46 +51,98 @@ describe("toBriefPayload", () => {
   });
 });
 
+const SAMPLE_PAYLOAD: VariantPayload = {
+  working_title: "The Isolation Experiment",
+  genre: "psychological thriller",
+  tone: "claustrophobic dread",
+  target_audience: "adults who like slow-burn tension",
+  logline: "A logline",
+  high_concept: "One sentence hook",
+  theme: "What we owe the people we've let down",
+  emotional_core: "Relief of being seen",
+  world_building: "A remote research facility.",
+  main_characters: [
+    {
+      name: "Dr. Rohan Patel",
+      age: "38",
+      motivation: "Understand human resilience",
+      internal_conflict: "Fear of losing his grip on reality",
+      external_conflict: "The facility itself",
+      arc: "Confident to unraveling to changed",
+    },
+  ],
+  three_act_structure: {
+    act1: {
+      opening_image: "Wide shot of the wilderness",
+      inciting_incident: "He seals himself inside",
+      first_turning_point: "The first malfunction",
+    },
+    act2: {
+      rising_conflict: "Malfunctions escalate",
+      midpoint: "He finds a hidden log",
+      complications: "His grip on reality slips",
+      lowest_point: "Life support fails",
+    },
+    act3: {
+      climax: "He confronts the truth",
+      resolution: "He escapes, changed",
+      final_image: "He looks back at the facility",
+    },
+  },
+  major_plot_twists: ["The experiment isn't what he thought"],
+  character_relationships: ["Patel vs. his own psyche"],
+  visual_style: "High contrast, claustrophobic camera work",
+  cinematic_references: ["Alfred Hitchcock — for suspense"],
+  production_considerations: {
+    locations: "Single set, low cost",
+    vfx: "Minimal, practical",
+    cast: "One lead",
+    production_scale: "Small, tight schedule",
+  },
+  constraint_validation: { genre: "Satisfies thriller conventions" },
+  uniqueness_note: "Leads with an unreliable-experimenter angle",
+  central_conflict: "conflict",
+  production_complexity: "low",
+  estimated_locations: 2,
+  estimated_principal_cast: 5,
+  vfx_level_used: "none",
+  screenplay_excerpt: null,
+};
+
 describe("fromVariantPayload", () => {
   it("maps every snake_case AI-service field to its camelCase Prisma equivalent", () => {
-    const payload: VariantPayload = {
-      logline: "A logline",
-      three_act_outline: { act1: "one", act2: "two", act3: "three" },
-      character_archetypes: ["mentor", "rival"],
-      central_conflict: "conflict",
-      production_complexity: "low",
-      estimated_locations: 2,
-      estimated_principal_cast: 5,
-      vfx_level_used: "none",
-    };
-
-    expect(fromVariantPayload(payload)).toEqual({
-      logline: "A logline",
-      threeActOutline: { act1: "one", act2: "two", act3: "three" },
-      characterArchetypes: ["mentor", "rival"],
-      centralConflict: "conflict",
-      productionComplexity: "low",
-      estimatedLocations: 2,
-      estimatedPrincipalCast: 5,
-      vfxLevelUsed: "none",
+    expect(fromVariantPayload(SAMPLE_PAYLOAD)).toEqual({
+      workingTitle: SAMPLE_PAYLOAD.working_title,
+      genre: SAMPLE_PAYLOAD.genre,
+      tone: SAMPLE_PAYLOAD.tone,
+      targetAudience: SAMPLE_PAYLOAD.target_audience,
+      logline: SAMPLE_PAYLOAD.logline,
+      highConcept: SAMPLE_PAYLOAD.high_concept,
+      theme: SAMPLE_PAYLOAD.theme,
+      emotionalCore: SAMPLE_PAYLOAD.emotional_core,
+      worldBuilding: SAMPLE_PAYLOAD.world_building,
+      mainCharacters: SAMPLE_PAYLOAD.main_characters,
+      threeActStructure: SAMPLE_PAYLOAD.three_act_structure,
+      majorPlotTwists: SAMPLE_PAYLOAD.major_plot_twists,
+      characterRelationships: SAMPLE_PAYLOAD.character_relationships,
+      visualStyle: SAMPLE_PAYLOAD.visual_style,
+      cinematicReferences: SAMPLE_PAYLOAD.cinematic_references,
+      productionConsiderations: SAMPLE_PAYLOAD.production_considerations,
+      constraintValidation: SAMPLE_PAYLOAD.constraint_validation,
+      uniquenessNote: SAMPLE_PAYLOAD.uniqueness_note,
+      centralConflict: SAMPLE_PAYLOAD.central_conflict,
+      productionComplexity: SAMPLE_PAYLOAD.production_complexity,
+      estimatedLocations: SAMPLE_PAYLOAD.estimated_locations,
+      estimatedPrincipalCast: SAMPLE_PAYLOAD.estimated_principal_cast,
+      vfxLevelUsed: SAMPLE_PAYLOAD.vfx_level_used,
+      screenplayExcerpt: SAMPLE_PAYLOAD.screenplay_excerpt,
     });
   });
 });
 
 describe("toVariantPayload", () => {
   it("is the exact inverse of fromVariantPayload for every field", () => {
-    const original: VariantPayload = {
-      logline: "Round trip",
-      three_act_outline: { act1: "1", act2: "2", act3: "3" },
-      character_archetypes: ["hero"],
-      central_conflict: "conflict",
-      production_complexity: "medium",
-      estimated_locations: 3,
-      estimated_principal_cast: 4,
-      vfx_level_used: "light",
-    };
-
-    const roundTripped = toVariantPayload(fromVariantPayload(original));
-    expect(roundTripped).toEqual(original);
+    const roundTripped = toVariantPayload(fromVariantPayload(SAMPLE_PAYLOAD));
+    expect(roundTripped).toEqual(SAMPLE_PAYLOAD);
   });
 });
