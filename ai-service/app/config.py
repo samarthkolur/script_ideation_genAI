@@ -34,6 +34,30 @@ class Settings(BaseSettings):
     # never be reachable by the browser directly (design.md DD-007).
     ai_service_shared_secret: str | None = None
 
+    # Token budgets for the screenplay-ideation prompt pipeline (see
+    # core/prompts/). Each generate call now produces ONE full 18-section,
+    # 1200-2000 word development document (not a whole batch — see
+    # openai_compatible.py's per-variant concurrent generation), so this is
+    # sized per-variant, not per-request. Tunable without a code change.
+    generate_max_tokens_per_variant: int = 5000
+    screenplay_max_tokens: int = 6000
+
+    # Firing every variant's generation call fully concurrently sounds
+    # free (they're independent HTTP calls) but isn't: vendor accounts
+    # enforce a tokens-per-minute (TPM) budget shared across all in-flight
+    # requests, and each of these rich, per-variant calls reserves
+    # thousands of tokens. Confirmed directly against Groq's on-demand
+    # tier (12000 TPM): even just 2 concurrent calls at this file's
+    # default generate_max_tokens_per_variant (5000, ~6800-6900 total
+    # with prompt overhead) collided and one 429'd — two concurrent calls
+    # alone exceed a 12000 TPM budget at this token size. Defaulting to 1
+    # (fully sequential) is the only setting confirmed reliable on this
+    # tier; each call still gets the full retry/backoff machinery, and a
+    # single failed variant no longer costs the whole batch (see
+    # openai_compatible.py). Raise this once verified against a
+    # higher-TPM tier/account.
+    max_concurrent_variant_generations: int = 1
+
 
 @lru_cache
 def get_settings() -> Settings:

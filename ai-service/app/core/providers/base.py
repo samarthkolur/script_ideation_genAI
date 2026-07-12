@@ -42,3 +42,9 @@ class ModelProvider(ABC):
     @abstractmethod
     async def validate(self, brief: BriefInput, variant: VariantOutput) -> dict[str, int]:
         """Score `variant` against `brief` per constraint dimension, 0-100 each."""
+
+    @abstractmethod
+    async def generate_screenplay(
+        self, brief: BriefInput, variant: VariantOutput, scene_target: int
+    ) -> str:
+        """Produce a formatted, industry-standard screenplay excerpt for `variant`."""

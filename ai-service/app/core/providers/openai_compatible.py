@@ -3,96 +3,45 @@
 Why this exists: `NimProvider` and `GroqProvider` are both literally "an
 OpenAI-compatible client pointed at a different base_url/key/model" — same
 retry/backoff policy, same defensive JSON extraction, same prompt
-templates. Before this existed, that logic was duplicated per-provider
-(and per design.md's Technical Debt notes, a duplicated bug already
-escaped once — the unguarded `response.choices[0]` empty-list crash, found
-and fixed in both `ai/eval/nim_client.py` and this file's predecessor on
-the same day). Extracting the shared mechanics here means a fix or a new
-provider only touches one place; each subclass only supplies its
-credentials/base_url/model_name via `__init__`.
+pipeline (app/core/prompts/). Before this existed, that logic was
+duplicated per-provider (and per design.md's Technical Debt notes, a
+duplicated bug already escaped once — the unguarded `response.choices[0]`
+empty-list crash, found and fixed in both `ai/eval/nim_client.py` and this
+file's predecessor on the same day). Extracting the shared mechanics here
+means a fix or a new provider only touches one place; each subclass only
+supplies its credentials/base_url/model_name via `__init__`.
+
+Generation strategy: each variant is now a full 18-section, 1200-2000-word
+development document (see design.md's screenplay-ideation redesign), not a
+short JSON fragment — one call asking for all of `variant_count` variants
+at once would risk truncation/timeout on top of NIM/Groq's already-
+documented reliability issues (design.md §9/§16). Instead `generate()`
+fires one concurrent call per variant (`asyncio.gather`), each with its
+own bounded token budget and the full retry/backoff machinery below,
+differentiated by a diversity-seed directive (see
+`core/prompts/diversity.py`) so independently-sampled calls still diverge.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 
 from openai import AsyncOpenAI, APIError, APIStatusError
 
+from app.config import get_settings
 from app.core.json_utils import parse_json_object
+from app.core.prompts.templates import (
+    build_generate_messages,
+    build_refine_messages,
+    build_screenplay_messages,
+)
 from app.core.providers.base import ModelProvider
 from app.schemas import BriefInput, VariantOutput
 
 _MAX_RETRIES = 3
 _RETRY_BASE_DELAY_SECONDS = 2.0
 _REQUEST_TIMEOUT_SECONDS = 180.0
-_GENERATE_MAX_TOKENS = 8192
 _JUDGE_MAX_TOKENS = 4096
-
-
-class EmptyChoicesError(RuntimeError):
-    """Raised when a backend returns HTTP 200 with an empty `choices` list.
-
-    Observed directly against NIM (design.md §16/§9, Development Log Entry
-    16) under degraded backend conditions. Treated as a transient,
-    retryable failure, same as 429/5xx — not assumed to be provider-
-    specific, since any OpenAI-compatible backend could in principle do
-    this under load.
-    """
-
-
-_SYSTEM_PROMPT = (
-    "You are a professional script development assistant helping "
-    "screenwriters brainstorm plot ideas. You generate original, "
-    "fictional story concepts only — never content based on real "
-    "identifiable people or events. Respond with a single JSON object "
-    "matching exactly the schema described in the user message, and "
-    "nothing else."
-)
-
-_GENERATE_TEMPLATE = """Generate {variant_count} distinct plot variants for a film with this brief:
-
-{brief_json}
-
-Each variant must be a genuinely different narrative direction (different \
-central conflict or premise) while fitting every constraint above \
-simultaneously — genre, audience, budget tier, runtime, region, language, \
-censorship rating, and production constraints (location type, cast size, \
-VFX dependency).
-
-Write all narrative text (logline, outline, character names/descriptions, \
-conflict) in the requested output_language.
-
-Return a single JSON object of the form:
-{{
-  "variants": [
-    {{
-      "logline": "one-sentence premise",
-      "three_act_outline": {{"act1": "...", "act2": "...", "act3": "..."}},
-      "character_archetypes": ["archetype 1", "archetype 2", ...],
-      "central_conflict": "one to two sentences",
-      "production_complexity": "low | medium | high",
-      "estimated_locations": <integer>,
-      "estimated_principal_cast": <integer>,
-      "vfx_level_used": "none | light | moderate | heavy"
-    }}
-  ]
-}}"""
-
-_REFINE_TEMPLATE = """Original brief:
-{brief_json}
-
-Current variant:
-{variant_json}
-
-Refinement instruction: {instruction}
-
-Apply this instruction while preserving the structural core (the same \
-central premise and characters) unless the instruction explicitly asks to \
-change them. Return a single JSON object with exactly the same shape as \
-the current variant above (logline, three_act_outline, \
-character_archetypes, central_conflict, production_complexity, \
-estimated_locations, estimated_principal_cast, vfx_level_used)."""
 
 _VALIDATE_TEMPLATE = """Creative brief the variant was supposed to satisfy:
 {brief_json}
@@ -111,6 +60,17 @@ Return a single JSON object of the form:
   "region_cultural_fit": <0-100>, "censorship_rating_adherence": <0-100>,
   "language_correctness": <0-100>, "narrative_coherence": <0-100>
 }}"""
+
+
+class EmptyChoicesError(RuntimeError):
+    """Raised when a backend returns HTTP 200 with an empty `choices` list.
+
+    Observed directly against NIM (design.md §16/§9, Development Log Entry
+    16) under degraded backend conditions. Treated as a transient,
+    retryable failure, same as 429/5xx — not assumed to be provider-
+    specific, since any OpenAI-compatible backend could in principle do
+    this under load.
+    """
 
 
 class OpenAICompatibleProvider(ModelProvider):
@@ -156,39 +116,60 @@ class OpenAICompatibleProvider(ModelProvider):
         raise last_error
 
     async def generate(self, brief: BriefInput, variant_count: int) -> list[VariantOutput]:
-        content = await self._chat(
-            system=_SYSTEM_PROMPT,
-            user=_GENERATE_TEMPLATE.format(
-                variant_count=variant_count,
-                brief_json=json.dumps(brief.model_dump(), indent=2, ensure_ascii=False),
-            ),
-            temperature=0.9,
-            max_tokens=_GENERATE_MAX_TOKENS,
+        settings = get_settings()
+        # Bounded, not unlimited, concurrency — see config.py's
+        # max_concurrent_variant_generations for why unlimited fan-out
+        # reproduces vendor-side TPM rate-limit failures at a larger scale.
+        semaphore = asyncio.Semaphore(settings.max_concurrent_variant_generations)
+
+        async def _generate_one(index: int) -> VariantOutput:
+            async with semaphore:
+                system, user = build_generate_messages(brief, index, variant_count)
+                content = await self._chat(
+                    system=system,
+                    user=user,
+                    temperature=1.0,
+                    max_tokens=settings.generate_max_tokens_per_variant,
+                )
+            return VariantOutput.model_validate(parse_json_object(content))
+
+        return list(
+            await asyncio.gather(*(_generate_one(i) for i in range(variant_count)))
         )
-        parsed = parse_json_object(content)
-        return [VariantOutput.model_validate(v) for v in parsed.get("variants", [])]
 
     async def refine(
         self, brief: BriefInput, variant: VariantOutput, instruction: str
     ) -> VariantOutput:
+        settings = get_settings()
+        system, user = build_refine_messages(brief, variant, instruction)
         content = await self._chat(
-            system=_SYSTEM_PROMPT,
-            user=_REFINE_TEMPLATE.format(
-                brief_json=json.dumps(brief.model_dump(), ensure_ascii=False),
-                variant_json=variant.model_dump_json(),
-                instruction=instruction,
-            ),
-            temperature=0.7,
-            max_tokens=_GENERATE_MAX_TOKENS,
+            system=system,
+            user=user,
+            temperature=0.8,
+            max_tokens=settings.generate_max_tokens_per_variant,
         )
         return VariantOutput.model_validate(parse_json_object(content))
+
+    async def generate_screenplay(
+        self, brief: BriefInput, variant: VariantOutput, scene_target: int
+    ) -> str:
+        settings = get_settings()
+        system, user = build_screenplay_messages(brief, variant, scene_target)
+        content = await self._chat(
+            system=system,
+            user=user,
+            temperature=0.85,
+            max_tokens=settings.screenplay_max_tokens,
+        )
+        parsed = parse_json_object(content)
+        return str(parsed["screenplay_excerpt"])
 
     async def validate(self, brief: BriefInput, variant: VariantOutput) -> dict[str, int]:
         content = await self._chat(
             system="You are a strict script development evaluator. Respond with a single JSON object and nothing else.",
             user=_VALIDATE_TEMPLATE.format(
-                brief_json=json.dumps(brief.model_dump(), ensure_ascii=False),
-                variant_json=variant.model_dump_json(),
+                brief_json=brief.model_dump_json(),
+                variant_json=variant.model_dump_json(exclude={"screenplay_excerpt"}),
             ),
             temperature=0.1,
             max_tokens=_JUDGE_MAX_TOKENS,

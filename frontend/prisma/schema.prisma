@@ -174,19 +174,49 @@ model GenerationRun {
   @@index([briefId])
 }
 
+// Rich screenplay-ideation output (design.md's screenplay-ideation
+// redesign — supersedes the earlier thin logline/three-sentence-outline
+// shape). Structured sub-objects (main characters, act breakdown,
+// production considerations, constraint validation) are stored as Json
+// since Postgres has no native nested-record column type and this exact
+// shape already exists once as the source of truth in
+// ai-service/app/schemas.py's VariantOutput — duplicating it as a second
+// set of Prisma models would be a second place for the two to drift.
+// Flat fields (logline, centralConflict, productionComplexity, the
+// location/cast/vfx numbers) are kept as real columns because the
+// compare-table and complexity-badge UI queries/filters on them directly.
 model Variant {
-  id                     String   @id @default(cuid())
-  generationRunId        String
-  index                  Int
-  logline                String
-  threeActOutline        Json // { act1, act2, act3 }
-  characterArchetypes    String[]
-  centralConflict        String
-  productionComplexity   String // low | medium | high
-  estimatedLocations     Int
-  estimatedPrincipalCast Int
-  vfxLevelUsed           String
-  createdAt              DateTime @default(now())
+  id                       String   @id @default(cuid())
+  generationRunId          String
+  index                    Int
+  workingTitle             String
+  genre                    String
+  tone                     String
+  targetAudience           String
+  logline                  String
+  highConcept              String
+  theme                    String
+  emotionalCore            String
+  worldBuilding            String
+  mainCharacters           Json // MainCharacter[] — name/age/motivation/internalConflict/externalConflict/arc
+  threeActStructure        Json // { act1: {openingImage, incitingIncident, firstTurningPoint}, act2: {...}, act3: {...} }
+  majorPlotTwists          String[]
+  characterRelationships   String[]
+  visualStyle              String
+  cinematicReferences      String[]
+  productionConsiderations Json // { locations, vfx, cast, productionScale }
+  constraintValidation     Json // Record<dimension, explanation>
+  uniquenessNote           String
+  centralConflict          String
+  productionComplexity     String // low | medium | high
+  estimatedLocations       Int
+  estimatedPrincipalCast   Int
+  vfxLevelUsed             String
+  // Populated only by the on-demand "Generate screenplay excerpt" action
+  // (POST /api/variants/[id]/screenplay) — null until a writer explicitly
+  // asks for the formatted script pages for this variant.
+  screenplayExcerpt        String?
+  createdAt                DateTime @default(now())
 
   generationRun       GenerationRun @relation(fields: [generationRunId], references: [id], onDelete: Cascade)
   refinementsAsParent Refinement[]  @relation("RefinementParent")

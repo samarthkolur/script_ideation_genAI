@@ -1,14 +1,15 @@
 """AI service entrypoint. Mounts every router; the only cross-cutting
 concern here is which routes are public (health) vs. internal/authenticated
-(generate, refine, validate — see dependencies.py). This service is called
-exclusively by the Next.js BFF, never by the browser (design.md DD-007).
+(generate, refine, screenplay, validate — see dependencies.py). This
+service is called exclusively by the Next.js BFF, never by the browser
+(design.md DD-007).
 """
 
 from __future__ import annotations
 
 from fastapi import FastAPI
 
-from app.routers import generate, health, refine, validate
+from app.routers import generate, health, refine, screenplay, validate
 
 app = FastAPI(
     title="PS241 AI Service",
@@ -19,4 +20,5 @@ app = FastAPI(
 app.include_router(health.router)
 app.include_router(generate.router)
 app.include_router(refine.router)
+app.include_router(screenplay.router)
 app.include_router(validate.router)
