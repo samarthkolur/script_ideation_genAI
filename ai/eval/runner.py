@@ -59,7 +59,7 @@ CANDIDATE_MODELS = [
 # per case), since a fast-but-wrong judge is worse than a correct one.
 DEFAULT_JUDGE_MODEL = "minimaxai/minimax-m3"
 TRIAGE_SAMPLE_SIZE = 6
-CONCURRENCY = 5
+CONCURRENCY = 2
 
 
 async def _run_one_case(
