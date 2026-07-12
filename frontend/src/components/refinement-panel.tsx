@@ -5,9 +5,14 @@
  * generation. AC-04 requires the structural core to be preserved while
  * incorporating the user's direction, so the UI explicitly frames this as
  * "refine," not "regenerate" (a separate, already-present action).
+ *
+ * A refinement creates a *new* Variant row linked back to the parent
+ * (Refinement model) rather than mutating in place, so history is
+ * preserved — on success this navigates to that new variant.
  */
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Wand2 } from "lucide-react";
 
@@ -16,6 +21,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useRefineVariant } from "@/hooks/use-variants";
 
 const QUICK_SUGGESTIONS = [
   "Darker tone",
@@ -25,9 +31,10 @@ const QUICK_SUGGESTIONS = [
   "Raise the stakes in Act III",
 ];
 
-export function RefinementPanel() {
+export function RefinementPanel({ variantId }: { variantId: string }) {
+  const router = useRouter();
   const [instruction, setInstruction] = useState("");
-  const [isRefining, setIsRefining] = useState(false);
+  const refine = useRefineVariant(variantId);
 
   function applySuggestion(suggestion: string) {
     setInstruction((prev) => (prev ? `${prev}; ${suggestion.toLowerCase()}` : suggestion));
@@ -38,14 +45,17 @@ export function RefinementPanel() {
       toast.error("Describe what you'd like to change first.");
       return;
     }
-    setIsRefining(true);
-    // Simulated latency — this screen has no backend yet (Phase 2 refinement endpoint).
-    setTimeout(() => {
-      setIsRefining(false);
-      toast.success("Refinement applied", {
-        description: "Wireframe only — structural core would be preserved per AC-04 once wired to the real refinement endpoint.",
-      });
-    }, 900);
+    refine.mutate(instruction, {
+      onSuccess: (result) => {
+        toast.success("Refinement applied", {
+          description: "Structural core preserved per AC-04 — opening the refined version.",
+        });
+        router.push(`/variants/${result.id}`);
+      },
+      onError: () => {
+        toast.error("Refinement failed. The AI service may be unavailable — try again.");
+      },
+    });
   }
 
   return (
@@ -78,7 +88,7 @@ export function RefinementPanel() {
           placeholder='e.g. "darker tone, and give the mentor character a hidden motive"'
           rows={3}
         />
-        {isRefining ? (
+        {refine.isPending ? (
           <div className="flex flex-col gap-2">
             <Skeleton className="h-4 w-3/4" />
             <Skeleton className="h-4 w-full" />

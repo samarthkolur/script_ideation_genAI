@@ -1,18 +1,10 @@
 "use client";
 
-/**
- * FR-08 — export a selected variant as PDF or plain text.
- *
- * Wireframe scope: the export *service* is a Phase 2 backend dependency
- * (source plan §5, Phase 2 task "Build export service"). This dialog
- * establishes the UX (format choice, confirmation) without a real file
- * being produced — the "Download" action here is explicitly mocked and
- * says so, rather than silently doing nothing on click.
- */
+/** FR-08 — export a selected variant as PDF or plain text. Generates and downloads via /api/variants/[id]/export (see lib/export.ts). */
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Download, FileText, File } from "lucide-react";
+import { Download, FileText, File, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -25,15 +17,23 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import type { Variant } from "@/lib/types";
+import { exportVariant } from "@/hooks/use-variants";
+import type { ApiVariant } from "@/lib/types";
 
-export function ExportDialog({ variant }: { variant: Variant }) {
+export function ExportDialog({ variant }: { variant: ApiVariant }) {
   const [format, setFormat] = useState<"pdf" | "text">("pdf");
+  const [isExporting, setIsExporting] = useState(false);
 
-  function handleExport() {
-    toast.success(`Export queued as ${format === "pdf" ? "PDF" : "plain text"}`, {
-      description: "Wireframe only — the export service ships in Phase 2 (FR-08).",
-    });
+  async function handleExport() {
+    setIsExporting(true);
+    try {
+      await exportVariant(variant.id, format);
+      toast.success(`Exported as ${format === "pdf" ? "PDF" : "plain text"}`);
+    } catch {
+      toast.error("Export failed. Try again.");
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   return (
@@ -67,8 +67,9 @@ export function ExportDialog({ variant }: { variant: Variant }) {
           </label>
         </RadioGroup>
         <DialogFooter>
-          <Button onClick={handleExport} className="gap-2">
-            <Download className="h-4 w-4" /> Download
+          <Button onClick={handleExport} disabled={isExporting} className="gap-2">
+            {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {isExporting ? "Preparing…" : "Download"}
           </Button>
         </DialogFooter>
       </DialogContent>

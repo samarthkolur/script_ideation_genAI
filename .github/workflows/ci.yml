@@ -42,10 +42,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Set up ai/.venv (matches local dev — see .pre-commit-config.yaml's ai-lint hook)
+      - name: Set up ai/.venv and ai-service/.venv (matches local dev — see .pre-commit-config.yaml)
         run: |
           python3 -m venv ai/.venv
           ai/.venv/bin/pip install --quiet ruff
+          python3 -m venv ai-service/.venv
+          ai-service/.venv/bin/pip install --quiet ruff
 
       # Runs the exact same .pre-commit-config.yaml used locally via `prek`.
       # This action uses the `pre-commit` Python package instead of `prek`
@@ -81,3 +83,31 @@ jobs:
       - name: Build
         run: npm run build
         working-directory: frontend
+
+  ai-service-build:
+    name: AI service import & health check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r ai-service/requirements.txt
+        working-directory: ai-service
+
+      # No NIM_API_KEY needed — MODEL_PROVIDER defaults to "mock" (see
+      # app/config.py), which is exactly the point of that provider: the
+      # service is fully verifiable without any external LLM dependency.
+      - name: Start service and hit /health + /internal/generate
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          sleep 2
+          curl -sf http://127.0.0.1:8000/health | grep '"provider":"mock"'
+          curl -sf -X POST http://127.0.0.1:8000/internal/generate \
+            -H "Content-Type: application/json" \
+            -d '{"brief": {"genres": ["drama"], "audience": "adult", "budget_tier": "low", "runtime_minutes": 90, "region": "us", "language": "en", "censorship_framework": "mpaa", "censorship_rating": "PG13", "location_type": "single_location", "cast_size": "small", "vfx_dependency": "none"}, "variant_count": 1}' \
+            | grep '"provider":"mock"'
+        working-directory: ai-service

@@ -1,13 +1,8 @@
 /**
- * Provisional types for the creative brief and generated variant.
- *
- * Status: PROVISIONAL. This is a wireframe-stage shape used only to type
- * mock data for Milestone 1.3. The authoritative, versioned contract is
- * the Variant Output Schema produced in Milestone 1.2 (schemas/), which
- * will supersede this file once the backend exists to serve real data
- * against it (Phase 2). Shape mirrors ai/eval/prompt_template.py's output
- * JSON so early UI work doesn't diverge from what's already been tested
- * against the real model in Milestone 1.1.
+ * Real API response types (Phase 2) — supersedes the Phase 1 "provisional"
+ * shape this file used to hold (see git history). Dates come over the
+ * wire as ISO strings (JSON has no Date type), which is why these aren't
+ * just the Prisma-generated model types directly.
  */
 
 export interface CreativeBrief {
@@ -32,9 +27,12 @@ export interface ThreeActOutline {
 }
 
 export type ProductionComplexity = "low" | "medium" | "high";
+export type GenerationRunStatus = "queued" | "generating" | "complete" | "failed";
 
-export interface Variant {
+export interface ApiVariant {
   id: string;
+  generationRunId: string;
+  index: number;
   logline: string;
   threeActOutline: ThreeActOutline;
   characterArchetypes: string[];
@@ -43,12 +41,59 @@ export interface Variant {
   estimatedLocations: number;
   estimatedPrincipalCast: number;
   vfxLevelUsed: string;
+  createdAt: string;
 }
 
-export interface Session {
-  id: string;
-  title: string;
-  createdAt: string;
-  brief: CreativeBrief;
-  variantCount: number;
+/** GET /api/variants/[id] includes the parent chain (for the "back to project" link and export title) that the plain ApiVariant shape (embedded in ApiGenerationRun below) doesn't need. */
+export interface ApiVariantDetail extends ApiVariant {
+  generationRun: {
+    id: string;
+    brief: {
+      id: string;
+      project: { id: string; title: string };
+    };
+  };
 }
+
+export interface ApiGenerationRun {
+  id: string;
+  briefId: string;
+  model: string;
+  status: GenerationRunStatus;
+  errorMessage: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  variants: ApiVariant[];
+}
+
+export interface ApiBrief extends CreativeBrief {
+  id: string;
+  projectId: string;
+  version: number;
+  createdAt: string;
+  generationRuns: ApiGenerationRun[];
+}
+
+export interface ApiProject {
+  id: string;
+  organizationId: string;
+  title: string;
+  createdById: string;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  briefs: ApiBrief[];
+}
+
+export interface ConstraintOptionDto {
+  id: string;
+  dimension: string;
+  code: string;
+  label: string;
+  metadata: Record<string, unknown> | null;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+/** Keyed by dimension (e.g. "genre", "budget_tier") — matches /api/constraint-taxonomy's grouping. */
+export type ConstraintTaxonomy = Record<string, ConstraintOptionDto[]>;

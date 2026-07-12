@@ -4,20 +4,22 @@
  * The FR-01 constraint input form — all 8 constraint dimensions in one
  * screen, grouped into scannable sections rather than one long list.
  *
- * Why client component: every field is interactive local state; there is
- * no server data to fetch yet (Phase 2 wires this to the real API). On
- * submit it navigates to the mock /variants screen — wireframe only, no
- * generation actually happens here.
+ * Options come from /api/constraint-taxonomy (Postgres, NFR-08) instead of
+ * a hardcoded file (Phase 1). Submitting creates a real Project + Brief
+ * and triggers real generation via the AI service — this can take a real
+ * amount of time (NIM queueing, or instant with the mock provider), so the
+ * submit button reflects actual pending state, not a fixed animation.
  */
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Sparkles } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
@@ -30,39 +32,94 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-
-import {
-  AUDIENCES,
-  BUDGET_TIERS,
-  CAST_SIZES,
-  CENSORSHIP_FRAMEWORKS,
-  GENRES,
-  LANGUAGES,
-  LOCATION_TYPES,
-  REGIONS,
-  REGION_DEFAULT_FRAMEWORK,
-  VFX_LEVELS,
-} from "@/lib/constraint-taxonomy";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useConstraintTaxonomy } from "@/hooks/use-constraint-taxonomy";
+import { useCreateProject } from "@/hooks/use-projects";
+import type { ConstraintOptionDto, ConstraintTaxonomy } from "@/lib/types";
 
 const MAX_GENRES = 2;
 
-export function ConstraintForm() {
-  const router = useRouter();
+/** Base UI's Select emits `string | null` (null = cleared); our fields are never clearable. */
+function onSelect(setter: (value: string) => void) {
+  return (value: string | null) => {
+    if (value) setter(value);
+  };
+}
 
-  const [genres, setGenres] = useState<string[]>(["scifi", "drama"]);
-  const [audience, setAudience] = useState("young_adult");
-  const [budgetTier, setBudgetTier] = useState("low");
+function ratingsFor(frameworkOptions: ConstraintOptionDto[], code: string): string[] {
+  const meta = frameworkOptions.find((f) => f.code === code)?.metadata;
+  return (meta?.ratings as string[] | undefined) ?? [];
+}
+
+function defaultFrameworkFor(regionOptions: ConstraintOptionDto[], code: string): string | undefined {
+  const meta = regionOptions.find((r) => r.code === code)?.metadata;
+  return meta?.defaultCensorshipFramework as string | undefined;
+}
+
+export function ConstraintForm() {
+  const { data: taxonomy, isLoading, isError } = useConstraintTaxonomy();
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col gap-6">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Card key={i}>
+            <CardHeader>
+              <Skeleton className="h-5 w-48" />
+              <Skeleton className="h-4 w-72" />
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-2/3" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
+  if (isError || !taxonomy) {
+    return (
+      <Card className="border-destructive/40">
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          Couldn&apos;t load the constraint taxonomy. Check the API/database connection and try again.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return <ConstraintFormLoaded taxonomy={taxonomy} />;
+}
+
+function ConstraintFormLoaded({ taxonomy }: { taxonomy: ConstraintTaxonomy }) {
+  const router = useRouter();
+  const createProject = useCreateProject();
+
+  const genreOptions = taxonomy.genre ?? [];
+  const audienceOptions = taxonomy.audience ?? [];
+  const budgetOptions = taxonomy.budget_tier ?? [];
+  const regionOptions = taxonomy.region ?? [];
+  const languageOptions = taxonomy.language ?? [];
+  const frameworkOptions = taxonomy.censorship_framework ?? [];
+  const locationOptions = taxonomy.location_type ?? [];
+  const castOptions = taxonomy.cast_size ?? [];
+  const vfxOptions = taxonomy.vfx_dependency ?? [];
+
+  const [title, setTitle] = useState("");
+  const [genres, setGenres] = useState<string[]>(() => genreOptions.slice(0, 2).map((g) => g.code));
+  const [audience, setAudience] = useState(() => audienceOptions[0]?.code ?? "");
+  const [budgetTier, setBudgetTier] = useState(() => budgetOptions[0]?.code ?? "");
   const [runtime, setRuntime] = useState(105);
-  const [region, setRegion] = useState("india");
-  const [language, setLanguage] = useState("en");
-  const [framework, setFramework] = useState(REGION_DEFAULT_FRAMEWORK["india"]);
-  const [rating, setRating] = useState("UA13");
-  const [locationType, setLocationType] = useState("limited_locations");
-  const [castSize, setCastSize] = useState("small");
-  const [vfx, setVfx] = useState("light");
-  const [notes, setNotes] = useState(
-    "Grounded, character-first sci-fi — think small-scale, not spectacle."
+  const [region, setRegion] = useState(() => regionOptions[0]?.code ?? "");
+  const [language, setLanguage] = useState(() => languageOptions[0]?.code ?? "");
+  const [framework, setFramework] = useState(
+    () => defaultFrameworkFor(regionOptions, regionOptions[0]?.code ?? "") ?? frameworkOptions[0]?.code ?? ""
   );
+  const [rating, setRating] = useState(() => ratingsFor(frameworkOptions, framework)[0] ?? "");
+  const [locationType, setLocationType] = useState(() => locationOptions[0]?.code ?? "");
+  const [castSize, setCastSize] = useState(() => castOptions[0]?.code ?? "");
+  const [vfx, setVfx] = useState(() => vfxOptions[0]?.code ?? "");
+  const [notes, setNotes] = useState("");
 
   function toggleGenre(code: string) {
     setGenres((prev) => {
@@ -77,32 +134,67 @@ export function ConstraintForm() {
 
   function handleRegionChange(code: string) {
     setRegion(code);
-    const defaultFramework = REGION_DEFAULT_FRAMEWORK[code];
-    setFramework(defaultFramework);
-    setRating(CENSORSHIP_FRAMEWORKS[defaultFramework].ratings[0]);
-  }
-
-  /** Base UI's Select emits `string | null` (null = cleared); our fields are never clearable. */
-  function onSelect(setter: (value: string) => void) {
-    return (value: string | null) => {
-      if (value) setter(value);
-    };
+    const defaultFw = defaultFrameworkFor(regionOptions, code) ?? frameworkOptions[0]?.code ?? "";
+    setFramework(defaultFw);
+    setRating(ratingsFor(frameworkOptions, defaultFw)[0] ?? "");
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!title.trim()) {
+      toast.error("Give this project a name.");
+      return;
+    }
     if (genres.length === 0) {
       toast.error("Select at least one genre.");
       return;
     }
-    toast.success("Brief submitted — generating 3 plot variants...", {
-      description: "This is a wireframe: navigating to mock results.",
-    });
-    router.push("/variants");
+    createProject.mutate(
+      {
+        title,
+        brief: {
+          genres,
+          audience,
+          budgetTier,
+          runtimeMinutes: runtime,
+          region,
+          language,
+          censorshipFramework: framework,
+          censorshipRating: rating,
+          locationType,
+          castSize,
+          vfxDependency: vfx,
+          freeformNotes: notes || undefined,
+        },
+      },
+      {
+        onSuccess: (project) => {
+          toast.success("Variants generated");
+          router.push(`/projects/${project.id}`);
+        },
+        onError: () => {
+          toast.error("Couldn't generate variants. The AI service may be unavailable — try again.");
+        },
+      }
+    );
   }
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Project</CardTitle>
+          <CardDescription>What is this concept called? You can rename it later.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g. Neural implant thriller — India, low-budget"
+          />
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Genre &amp; Audience</CardTitle>
@@ -112,15 +204,12 @@ export function ConstraintForm() {
           <div className="flex flex-col gap-3">
             <Label>Genre</Label>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {GENRES.map((g) => (
+              {genreOptions.map((g) => (
                 <label
                   key={g.code}
                   className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5"
                 >
-                  <Checkbox
-                    checked={genres.includes(g.code)}
-                    onCheckedChange={() => toggleGenre(g.code)}
-                  />
+                  <Checkbox checked={genres.includes(g.code)} onCheckedChange={() => toggleGenre(g.code)} />
                   {g.label}
                 </label>
               ))}
@@ -131,7 +220,7 @@ export function ConstraintForm() {
             <Select value={audience} onValueChange={onSelect(setAudience)}>
               <SelectTrigger id="audience"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {AUDIENCES.map((a) => (
+                {audienceOptions.map((a) => (
                   <SelectItem key={a.code} value={a.code}>{a.label}</SelectItem>
                 ))}
               </SelectContent>
@@ -147,7 +236,7 @@ export function ConstraintForm() {
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
           <RadioGroup value={budgetTier} onValueChange={setBudgetTier} className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {BUDGET_TIERS.map((b) => (
+            {budgetOptions.map((b) => (
               <label
                 key={b.code}
                 className="flex cursor-pointer items-start gap-2 rounded-md border p-3 text-sm has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5"
@@ -184,7 +273,7 @@ export function ConstraintForm() {
             <Select value={region} onValueChange={onSelect(handleRegionChange)}>
               <SelectTrigger id="region"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {REGIONS.map((r) => (
+                {regionOptions.map((r) => (
                   <SelectItem key={r.code} value={r.code}>{r.label}</SelectItem>
                 ))}
               </SelectContent>
@@ -195,7 +284,7 @@ export function ConstraintForm() {
             <Select value={language} onValueChange={onSelect(setLanguage)}>
               <SelectTrigger id="language"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {LANGUAGES.map((l) => (
+                {languageOptions.map((l) => (
                   <SelectItem key={l.code} value={l.code}>{l.label}</SelectItem>
                 ))}
               </SelectContent>
@@ -207,13 +296,13 @@ export function ConstraintForm() {
               value={framework}
               onValueChange={onSelect((v) => {
                 setFramework(v);
-                setRating(CENSORSHIP_FRAMEWORKS[v].ratings[0]);
+                setRating(ratingsFor(frameworkOptions, v)[0] ?? "");
               })}
             >
               <SelectTrigger id="framework"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {Object.entries(CENSORSHIP_FRAMEWORKS).map(([code, fw]) => (
-                  <SelectItem key={code} value={code}>{fw.label}</SelectItem>
+                {frameworkOptions.map((fw) => (
+                  <SelectItem key={fw.code} value={fw.code}>{fw.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -223,7 +312,7 @@ export function ConstraintForm() {
             <Select value={rating} onValueChange={onSelect(setRating)}>
               <SelectTrigger id="rating"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {CENSORSHIP_FRAMEWORKS[framework].ratings.map((r) => (
+                {ratingsFor(frameworkOptions, framework).map((r) => (
                   <SelectItem key={r} value={r}>{r}</SelectItem>
                 ))}
               </SelectContent>
@@ -243,7 +332,7 @@ export function ConstraintForm() {
             <Select value={locationType} onValueChange={onSelect(setLocationType)}>
               <SelectTrigger id="location"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {LOCATION_TYPES.map((l) => (
+                {locationOptions.map((l) => (
                   <SelectItem key={l.code} value={l.code}>{l.label}</SelectItem>
                 ))}
               </SelectContent>
@@ -254,7 +343,7 @@ export function ConstraintForm() {
             <Select value={castSize} onValueChange={onSelect(setCastSize)}>
               <SelectTrigger id="cast"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {CAST_SIZES.map((c) => (
+                {castOptions.map((c) => (
                   <SelectItem key={c.code} value={c.code}>{c.label}</SelectItem>
                 ))}
               </SelectContent>
@@ -265,7 +354,7 @@ export function ConstraintForm() {
             <Select value={vfx} onValueChange={onSelect(setVfx)}>
               <SelectTrigger id="vfx"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {VFX_LEVELS.map((v) => (
+                {vfxOptions.map((v) => (
                   <SelectItem key={v.code} value={v.code}>{v.label}</SelectItem>
                 ))}
               </SelectContent>
@@ -293,11 +382,12 @@ export function ConstraintForm() {
         <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
           <span>Ready to generate:</span>
           {genres.map((g) => (
-            <Badge key={g} variant="secondary">{GENRES.find((x) => x.code === g)?.label}</Badge>
+            <Badge key={g} variant="secondary">{genreOptions.find((x) => x.code === g)?.label}</Badge>
           ))}
         </div>
-        <Button type="submit" size="lg" className="gap-2">
-          <Sparkles className="h-4 w-4" /> Generate variants
+        <Button type="submit" size="lg" disabled={createProject.isPending} className="gap-2">
+          {createProject.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+          {createProject.isPending ? "Generating…" : "Generate variants"}
         </Button>
       </div>
     </form>

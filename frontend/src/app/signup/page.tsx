@@ -41,7 +41,7 @@ export default function SignUpPage() {
       setServerError(error.message ?? "Could not create your account. Try again.");
       return;
     }
-    router.push("/");
+    router.push("/dashboard");
     router.refresh();
   }
 

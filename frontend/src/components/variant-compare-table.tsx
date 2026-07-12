@@ -10,9 +10,9 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import type { Variant } from "@/lib/types";
+import type { ApiVariant } from "@/lib/types";
 
-const ROWS: { label: string; render: (v: Variant) => React.ReactNode }[] = [
+const ROWS: { label: string; render: (v: ApiVariant) => React.ReactNode }[] = [
   { label: "Logline", render: (v) => <span className="text-sm">{v.logline}</span> },
   { label: "Central conflict", render: (v) => <span className="text-sm text-muted-foreground">{v.centralConflict}</span> },
   {
@@ -29,7 +29,7 @@ const ROWS: { label: string; render: (v: Variant) => React.ReactNode }[] = [
   { label: "VFX level", render: (v) => <span>{v.vfxLevelUsed}</span> },
 ];
 
-export function VariantCompareTable({ variants }: { variants: Variant[] }) {
+export function VariantCompareTable({ variants }: { variants: ApiVariant[] }) {
   return (
     <div className="overflow-x-auto rounded-lg border">
       <Table>

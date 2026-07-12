@@ -58,3 +58,10 @@ repos:
         language: system
         files: ^ai/.*\.py$
         pass_filenames: false
+
+      - id: ai-service-lint
+        name: ai-service — ruff check
+        entry: bash -c 'ai-service/.venv/bin/ruff check ai-service/app/'
+        language: system
+        files: ^ai-service/.*\.py$
+        pass_filenames: false

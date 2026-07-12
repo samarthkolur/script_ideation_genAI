@@ -14,26 +14,28 @@ This project is being executed by a single developer + Claude Code, not the 7–
 
 ## 2. Current Architecture
 
-**Target architecture (approved, being built incrementally — see §12/§13 for what's actually live today):**
+**The full hybrid architecture is built, migrated, seeded, and verified end-to-end against the real database.** Signup → org auto-provisioning → constraint taxonomy (served from Postgres) → project creation → real generation (mock provider) → variant persistence → refinement → PDF/text export were all exercised via real HTTP requests against the running dev server and passed. This is no longer "built but unverified" — it works.
 
 ```
 ┌─────────────────────┐        ┌──────────────────────────┐        ┌─────────────────┐
 │   Browser (Next.js   │  HTTP  │  Next.js BFF               │  HTTP  │  AI Service       │
-│   client components) │───────▶│  (Route Handlers, Vercel)  │───────▶│  (FastAPI, Python)│
-│                       │◀───────│  - Better Auth              │◀───────│  - NIM client      │
-│  TanStack Query,      │        │  - Prisma → Postgres        │        │  - NeMo Guardrails │
-│  React Hook Form,     │        │  - Zod validation            │        │  - constraint       │
-│  Motion, shadcn/ui    │        │  - business logic             │        │    validation        │
-└─────────────────────┘        │  - PostHog, Pino logging     │        │  - (later) Triton /  │
-                                 └──────────────────────────┘        │    TensorRT-LLM      │
+│   client components) │───────▶│  (Route Handlers)          │───────▶│  (FastAPI, Python)│
+│                       │◀───────│  - Better Auth              │◀───────│  - ModelProvider    │
+│  TanStack Query,      │        │  - Prisma → Postgres        │        │    interface        │
+│  shadcn/ui, RHF+Zod   │        │  - Zod validation            │        │  - MockProvider     │
+└─────────────────────┘        │  - business logic             │        │  - NimProvider      │
+                                 └──────────────────────────┘        │  - (later) Triton /  │
+                                                                       │    TensorRT-LLM      │
                                                                        └─────────────────┘
 ```
 
-**Boundary rules:** the browser only ever talks to Next.js Route Handlers — never Postgres, the AI service, or NIM directly. The Next.js BFF never calls NIM directly either — only the AI service does, server-to-server, over a shared-secret-protected internal API. This keeps Triton/TensorRT-LLM addable later without touching the product layer (full rationale in the approved plan, §2).
+**Boundary rules (enforced in code, not just documented):** the browser only ever talks to Next.js Route Handlers (`frontend/src/app/api/*`) — never Postgres, the AI service, or NIM directly; verified by grep, nothing in `frontend/src/components` or client-marked files imports `ai-service-client.ts` or `db.ts` (both guarded with `import "server-only"`). The BFF never calls NIM directly either — only the AI service does, via `ai-service/app/core/providers/nim_provider.py`, server-to-server over a shared-secret header (`X-Internal-Secret`).
 
-**What's actually live right now (Foundation sub-milestone, in progress):** Prisma schema defined and validated against `prisma/schema.prisma` (not yet migrated to a real database — blocked on `frontend/.env` `DATABASE_URL`, see §7). Better Auth wired (email/password, org-per-user auto-provisioning via a database hook) but untested against a real DB for the same reason. Design tokens (color/typography/elevation) overhauled in `frontend/src/app/globals.css`. The AI service (`ai-service/`, evolved from `ai/eval/`) has not been started yet. The BFF API layer (Route Handlers for projects/briefs/variants) has not been started yet — `frontend/src/lib/mock-data.ts` is still the only data source the UI reads from.
+**The pluggable model provider (DD-016)** is the direct answer to Milestone 1.1's NIM reliability problems (queue congestion, a model deployment going fully "DEGRADED" mid-run — see §16). `ai-service/app/core/providers/base.py` defines the `ModelProvider` interface (`generate`/`refine`/`validate`); `MockProvider` (deterministic, instant, zero external dependency) and `NimProvider` (real NIM, with every lesson from Milestone 1.1 baked in — 180s timeout, defensive JSON parsing, 8192-token budget for reasoning models) both implement it. Switching is one env var (`MODEL_PROVIDER=mock|nim` in `ai-service/.env`) — nothing else in the AI service, the BFF, or the frontend changes. Verified end-to-end against the mock provider via direct curl calls to all four endpoints (`/health`, `/internal/generate`, `/internal/refine`, `/internal/validate`).
 
-Backend framework for the AI service is **FastAPI** (Python) — chosen for consistency with the existing `ai/eval/` code and native fit with NeMo Guardrails (Python library). Not yet built.
+**Verified this session, via real HTTP requests against a running dev server (not just build/lint/typecheck):** signup (`POST /api/auth/sign-up/email`) → org auto-provisioning fired correctly → `GET /api/constraint-taxonomy` returned 70 seeded options across 9 dimensions → `POST /api/projects` created a real Project+Brief+GenerationRun and got 3 real, distinct variants back from the AI service (mock provider) → `GET /api/variants/[id]` returned the full nested detail → `POST /api/variants/[id]/refine` created a linked new Variant preserving structure → `POST /api/variants/[id]/export` produced both a well-formatted `.txt` and a genuinely valid PDF (confirmed via `file`) → `POST /api/projects/[id]/briefs` (regenerate) created brief version 2 with 3 more variants → unauthenticated requests correctly redirect to `/login` → Zod validation correctly rejects malformed input (400). Test data was created and then cleaned up from the real database afterward.
+
+Backend framework for the AI service is **FastAPI** (Python) — chosen for consistency with the existing `ai/eval/` code and native fit with NeMo Guardrails (Python library, still not integrated — tracked in Pending Tasks). Built.
 
 ## 3. Repository Structure
 
@@ -43,50 +45,85 @@ project/
 ├── design.md                          # This file — authoritative engineering context
 ├── PS241_Script_Ideation_Assistant_Project_Plan.md   # Source requirements/plan (read-only input)
 ├── .gitignore
-├── .env.example                       # Template for required secrets (NVIDIA_API_KEY, etc.) — placeholders only, see DD-013
-├── .pre-commit-config.yaml            # Git hooks: gitleaks, detect-private-key, frontend eslint/tsc, ai ruff — DD-014
-├── .github/workflows/ci.yml           # CI backstop for the same checks, runs unconditionally on push/PR — DD-015
+├── .env.example                       # Root secrets template (NVIDIA_API_KEY — for ai/eval/) — placeholders only, see DD-013
+├── .pre-commit-config.yaml            # Git hooks: gitleaks, detect-private-key, frontend eslint/tsc, ai + ai-service ruff — DD-014
+├── .github/workflows/ci.yml           # CI backstop, 3 jobs (pre-commit, frontend-build, ai-service-build) — DD-015
 ├── docs/
-│   ├── constraint-taxonomy-v1.md      # CT-01..CT-08 — enumerated constraint values (Milestone 1.0)
-│   ├── adr/                           # Architecture Decision Records (Phase 2+)
-│   └── reports/                       # Generated evaluation/test reports (baseline eval, etc.)
-├── schemas/                           # Shared data contracts (Variant Output Schema v1 — Milestone 1.2)
-├── ai/                                # LLM baseline evaluation harness (Milestone 1.1) — will evolve into ai-service/ (see §12 Phase 2)
+│   ├── constraint-taxonomy-v1.md      # CT-01..CT-08 — human-readable source of truth, now seeded into Postgres (prisma/seed.ts)
+│   ├── adr/                           # Architecture Decision Records (not yet used)
+│   └── reports/                       # LLM baseline evaluation reports (Milestone 1.1)
+├── schemas/                           # Empty — superseded by frontend/prisma/schema.prisma + ai-service/app/schemas.py (the two ends of the real contract)
+├── ai/                                # Milestone 1.1 LLM evaluation harness — kept as-is, not deleted (regression-test value)
 │   ├── eval/
-│   └── prompts/                       # Prompt architecture / templates (Milestone 1.2)
-└── frontend/                          # Next.js 16 BFF — Phase 1 wireframe screens still present, Phase 2 replaces them incrementally
+│   └── prompts/                       # Still empty — superseded by ai-service/app/core/nim_provider.py's prompt templates
+├── ai-service/                        # NEW — internal AI orchestration service (FastAPI), never called by the browser
+│   ├── .env.example                   # MODEL_PROVIDER, NIM_API_KEY, NIM_BASE_URL, NIM_MODEL_NAME, AI_SERVICE_SHARED_SECRET
+│   ├── requirements.txt
+│   └── app/
+│       ├── main.py                    # Mounts routers
+│       ├── config.py                  # Settings (pydantic-settings) — MODEL_PROVIDER is the "plug and go" switch
+│       ├── dependencies.py            # Shared-secret auth check for /internal/* routes
+│       ├── schemas.py                 # BriefInput/VariantOutput/... — the BFF<->AI-service contract
+│       ├── routers/                   # health.py, generate.py, refine.py, validate.py
+│       └── core/
+│           ├── json_utils.py          # Defensive JSON extraction (NIM models leak reasoning text around valid JSON)
+│           └── providers/
+│               ├── base.py            # ModelProvider abstract interface — the pluggable seam
+│               ├── mock_provider.py   # Deterministic, instant, zero external dependency (default)
+│               └── nim_provider.py    # Real NIM — timeout/retry/token-budget lessons from Milestone 1.1
+└── frontend/                          # Next.js 16 BFF + UI — fully rewired to real data, no mock data remaining
     ├── .env.example                   # DATABASE_URL, BETTER_AUTH_SECRET, BETTER_AUTH_URL, AI_SERVICE_URL, AI_SERVICE_SHARED_SECRET
     ├── prisma/
-    │   └── schema.prisma              # Postgres schema — User/Session/Account/Verification (Better Auth) + product domain (§ below)
-    ├── prisma.config.ts               # Prisma 7 migration config (reads DATABASE_URL; schema.prisma has no `url` field — see DD-009)
+    │   ├── schema.prisma               # Postgres schema — Better Auth tables + product domain (Org/Project/Brief/GenerationRun/Variant/Refinement/Export/ConstraintOption)
+    │   └── seed.ts                     # Seeds ConstraintOption from docs/constraint-taxonomy-v1.md
+    ├── prisma.config.ts                # Prisma 7 migration config (DD-009); wires seed.ts via `tsx`
     └── src/
-        ├── app/                       # dashboard (/), /create, /variants, /variants/[id] (Phase 1, not yet rebuilt), /login, /signup (Phase 2), /api/auth/[...all]
-        ├── components/                # app-shell, theme-provider, theme-toggle, query-provider, constraint-form, variant-card, variant-compare-table, export-dialog, refinement-panel, ui/ (shadcn primitives)
-        ├── lib/                       # db.ts (Prisma singleton), auth.ts, auth-client.ts, validations/ (Zod), constraint-taxonomy.ts, types.ts, mock-data.ts (Phase 1 — being replaced by real API/DB in Phase 2)
-        └── generated/prisma/          # Prisma Client output — generated, gitignored, do not hand-edit
+        ├── proxy.ts                    # Auth-gating (Next.js 16 renamed "middleware" to "proxy" — DD-017)
+        ├── app/
+        │   ├── page.tsx                 # Dashboard — real useProjects()
+        │   ├── create/page.tsx          # Brief wizard — real useConstraintTaxonomy() + useCreateProject()
+        │   ├── projects/[id]/page.tsx    # NEW — project's variants (cards/compare), replaces Phase 1's generic /variants
+        │   ├── variants/[id]/page.tsx    # Variant detail + refine + export — real useVariant()
+        │   ├── login/page.tsx, signup/page.tsx
+        │   └── api/                      # projects, projects/[id], projects/[id]/briefs, variants/[id], variants/[id]/refine,
+        │                                  # variants/[id]/export, constraint-taxonomy, generation-runs/[id], auth/[...all]
+        ├── components/                  # app-shell (now client, session-aware), constraint-form (real taxonomy+submit),
+        │                                  # variant-card, variant-compare-table, export-dialog, refinement-panel (all real data now),
+        │                                  # theme-provider, theme-toggle, query-provider, ui/ (shadcn primitives)
+        ├── hooks/                        # NEW — use-projects.ts, use-variants.ts, use-constraint-taxonomy.ts (TanStack Query)
+        ├── lib/
+        │   ├── db.ts, auth.ts, auth-client.ts, session.ts (NEW), ai-service-client.ts (NEW), mappers.ts (NEW),
+        │   │   api-client.ts (NEW), api-helpers.ts (NEW), variants.ts (NEW), export.ts (NEW — pdf-lib rendering)
+        │   ├── validations/brief.ts (NEW), auth.ts
+        │   └── types.ts                  # Real API response types — Phase 1's provisional shape fully replaced
+        └── generated/prisma/             # Prisma Client output — generated, gitignored, do not hand-edit
 ```
+
+**Deleted this session** (superseded, no longer referenced anywhere): `frontend/src/lib/mock-data.ts`, `frontend/src/lib/constraint-taxonomy.ts` (the hardcoded Phase 1 version), `frontend/src/app/variants/page.tsx` (the generic mock-data list, replaced by `projects/[id]/page.tsx`).
 
 ## 4. Technology Stack
 
 | Layer | Choice | Status |
 |---|---|---|
-| Frontend framework | Next.js (App Router, TypeScript) | Decided (DD-002) |
-| UI component library | shadcn/ui (Base UI) + Tailwind CSS v4 | Decided (DD-002, DD-006) |
-| **BFF / backend-for-frontend** | **Next.js Route Handlers, deployed on Vercel** | **Decided (DD-007), build not started** |
-| Database | PostgreSQL (user-hosted instance) | Decided (DD-007), schema written, not migrated yet |
-| ORM | Prisma 7 (driver-adapter model, `@prisma/adapter-pg`) | Decided (DD-007), wired (DD-009) |
-| Auth | Better Auth (email/password v1) | Decided (DD-008), wired, not tested against real DB yet |
-| Server state | TanStack Query | Decided (DD-007), provider wired, no queries yet |
-| Forms | React Hook Form + Zod | Decided (DD-007), used in login/signup |
-| Animation | Motion (Framer Motion) | Decided (DD-007), installed, not yet used |
-| Analytics | PostHog | Decided (DD-007), not yet installed |
-| Logging | Pino | Decided (DD-007), not yet installed |
-| **AI orchestration language** | **Python 3.12, in a separate internal AI service** | Decided (DD-003, reaffirmed DD-007) |
-| LLM provider | NVIDIA NIM (hosted, OpenAI-compatible API) | Decided (DD-003) |
-| LLM client library | `openai` Python SDK, `base_url` pointed at NIM | Decided (DD-003) |
-| AI service framework | FastAPI (Python) | Planned, Phase 2 sub-milestone "AI service evolution" — not started |
-| Content policy layer | NeMo Guardrails | Planned, Phase 2 (AI service) |
-| Inference scaling | Triton Inference Server | Planned, later (needs persistent GPU infra, addable without touching the BFF — DD-007) |
+| Frontend framework | Next.js 16 (App Router, TypeScript) | Built |
+| UI component library | shadcn/ui (Base UI) + Tailwind CSS v4 | Built (DD-002, DD-006, DD-011) |
+| **BFF / backend-for-frontend** | **Next.js Route Handlers** | **Built (DD-007) — 8 route groups, all typecheck/lint/build clean; unverified against real DB** |
+| Database | PostgreSQL (user-hosted, Supabase) | Schema written, migration blocked (DD-019 — IPv6 direct-connection issue) |
+| ORM | Prisma 7 (driver-adapter model, `@prisma/adapter-pg`) | Built (DD-009) |
+| Auth | Better Auth (email/password v1) | Built (DD-008), incl. `proxy.ts` route gating; unverified against real DB |
+| Server state | TanStack Query | Built — 3 hook modules (projects, variants, constraint-taxonomy) |
+| Forms | React Hook Form + Zod | Built — login/signup/brief-wizard |
+| PDF generation | pdf-lib | Built (DD-020) — export renders PDF/text on-demand, not persisted (no blob storage yet) |
+| Animation | Motion (Framer Motion) | Installed, not yet used (deferred — see Pending Tasks) |
+| Analytics | PostHog | Not yet installed (deferred) |
+| Logging | Pino | Not yet installed (deferred) |
+| **AI orchestration language** | **Python 3.12, in a separate internal AI service (`ai-service/`)** | **Built (DD-003, DD-007, DD-016)** |
+| Model provider abstraction | Custom `ModelProvider` interface (`MockProvider` + `NimProvider`) | Built (DD-016) — verified end-to-end against mock |
+| LLM provider | NVIDIA NIM (hosted, OpenAI-compatible API), via `NimProvider` | Built (DD-003) |
+| LLM client library | `openai` Python SDK, `base_url` pointed at NIM | Built (DD-003) |
+| AI service framework | FastAPI (Python) | Built — 4 endpoints, all verified against mock provider |
+| Content policy layer | NeMo Guardrails | Not yet integrated — tracked in Pending Tasks |
+| Inference scaling | Triton Inference Server | Planned, later (needs persistent GPU infra, addable without touching the BFF or the AI service's public interface — DD-007, DD-016) |
 | Inference optimization | TensorRT-LLM | Planned, later (same note) |
 | Version control | git, repo scoped to `project/` | Decided (DD-004) |
 
@@ -135,7 +172,25 @@ Rationale: mid-Phase-2, real secrets (NVIDIA API key, Postgres connection string
 Rationale: direct response to the DD-013 incident — `gitleaks` is exactly the hook that would have caught the leaked key before it ever reached a commit. Bundled lint/typecheck in at the same time since the infrastructure (a hook that blocks bad commits) is the same either way, and it stops the "committed code that doesn't even build" failure mode too. Used `prek` (already present in this environment, `pre-commit`-config-compatible, faster) rather than installing the Python `pre-commit` package. Local hooks (`frontend-lint`, `frontend-typecheck`, `ai-lint`) call the project's own already-installed toolchains (`frontend/node_modules`, `ai/.venv`) via `language: system` instead of letting the framework manage a second isolated environment — avoids duplicating dependency installs and can't silently drift from what `npm run lint`/`npm run build` actually do. Verified end-to-end: `prek run --all-files` passes clean (11/11 hooks) against the current repo state; two real lint findings in `ai/eval/report.py` and `test_prompts.py` (genuine dead code from earlier work, not hook misconfiguration) were fixed as part of turning this on, not suppressed.
 
 **DD-015 — GitHub Actions CI (`.github/workflows/ci.yml`) runs the *same* `.pre-commit-config.yaml` via the official `pre-commit/action`, plus a separate `frontend-build` job, rather than duplicating hook logic in workflow YAML or trying to run `prek` itself in CI.**
-Rationale: local hooks (DD-014) only protect commits made on a machine that has `prek install` run — skippable via `--no-verify`, and simply absent after a fresh clone until someone remembers to reinstall. CI is the backstop that runs unconditionally on every push/PR regardless of local setup; this is the actual reason for the request (do not rely on hooks alone for something as consequential as secret scanning after a real leak). Used `pre-commit/action` (official, Python-based) instead of installing `prek` in the runner — `prek` is newer with a less-established CI story, and since both tools read the identical `.pre-commit-config.yaml` and drive the same underlying tools (gitleaks binary, eslint, tsc, ruff), the choice of orchestrator doesn't change what gets checked, only which one is more provable to work correctly in an environment this session can't actually execute a GitHub Actions run in to verify. The `frontend-build` job is separate from the lint/typecheck job so a `next build`-specific failure (e.g. a route conflict that only surfaces at build time, not from `tsc` alone) reports independently. Both jobs set dummy `DATABASE_URL`/`BETTER_AUTH_SECRET` env vars — required because `next build` touches `src/lib/db.ts`/`auth.ts` at the module level (see DD-009), not because any route is actually invoked at build time; clearly commented in the workflow as placeholders, never real secrets. Validated locally: YAML parses correctly (with `"on"` explicitly quoted — bare `on:` parses as boolean `true` under PyYAML/YAML 1.1, a well-known quirk GitHub's own parser doesn't share, but quoting removes the ambiguity for other tooling reading the file, including our own `check-yaml` hook) and `prek run --all-files` (which includes gitleaks) passes clean against the new workflow file itself. **Not verified against a real GitHub Actions run** — no repo to push to right now (see §16); first real push should be treated as this workflow's actual first test.
+Rationale: local hooks (DD-014) only protect commits made on a machine that has `prek install` run — skippable via `--no-verify`, and simply absent after a fresh clone until someone remembers to reinstall. CI is the backstop that runs unconditionally on every push/PR regardless of local setup; this is the actual reason for the request (do not rely on hooks alone for something as consequential as secret scanning after a real leak). Used `pre-commit/action` (official, Python-based) instead of installing `prek` in the runner — `prek` is newer with a less-established CI story, and since both tools read the identical `.pre-commit-config.yaml` and drive the same underlying tools (gitleaks binary, eslint, tsc, ruff), the choice of orchestrator doesn't change what gets checked, only which one is more provable to work correctly in an environment this session can't actually execute a GitHub Actions run in to verify. The `frontend-build` job is separate from the lint/typecheck job so a `next build`-specific failure (e.g. a route conflict that only surfaces at build time, not from `tsc` alone) reports independently. Both jobs set dummy `DATABASE_URL`/`BETTER_AUTH_SECRET` env vars — required because `next build` touches `src/lib/db.ts`/`auth.ts` at the module level (see DD-009), not because any route is actually invoked at build time; clearly commented in the workflow as placeholders, never real secrets. Validated locally: YAML parses correctly (with `"on"` explicitly quoted — bare `on:` parses as boolean `true` under PyYAML/YAML 1.1, a well-known quirk GitHub's own parser doesn't share, but quoting removes the ambiguity for other tooling reading the file, including our own `check-yaml` hook) and `prek run --all-files` (which includes gitleaks) passes clean against the new workflow file itself. **Not verified against a real GitHub Actions run** — no repo to push to right now (see §16); first real push should be treated as this workflow's actual first test. (Since this DD was written, the CI workflow gained a third job, `ai-service-build` — same "unverified against a real run" caveat applies to it too.)
+
+**DD-016 — Pluggable `ModelProvider` interface (`ai-service/app/core/providers/base.py`), with a first-class `MockProvider` alongside `NimProvider`, rather than a single hardcoded NIM integration.**
+Rationale: direct response to Milestone 1.1's real-world NIM reliability findings — shared-tier queue congestion (441 requests queued, 60s+ for trivial calls) and, on the actual full evaluation attempt, a model deployment going entirely "DEGRADED" mid-run (42/42 cases failed). The user's explicit ask — "leave the model part as a separate module... so even on changing model, it should be adaptable... plug and go" — is satisfied structurally: every router depends only on `get_provider()` (registry.py), never on a concrete class; adding a provider is one new file + one registry line, zero changes elsewhere. `MockProvider` is not a toy — it reads real brief fields into varied, plausible output (fixed a real bug during testing: two variants got the identical logline because independent per-variant random draws collided; switched to a shuffled-pool-cycled-by-index approach that guarantees no repeats) — and its existence means the entire frontend-to-BFF-to-AI-service pipeline is independently verifiable without depending on any external LLM's uptime. Default `MODEL_PROVIDER=mock`; real generation is `MODEL_PROVIDER=nim`, one line in `ai-service/.env`.
+
+**DD-017 — Next.js 16 renamed `middleware.ts` to `proxy.ts` (same mechanism, `export function proxy` instead of `export function middleware`) — not a choice, a breaking change caught by the build.**
+Rationale: `frontend/AGENTS.md` explicitly warns this Next.js version diverges from training data; confirmed directly (`next build` emitted a deprecation warning naming the exact rename) and checked `node_modules/next/dist/docs/01-app/01-getting-started/16-proxy.md` before renaming, rather than guessing at the new convention. The auth-gating logic itself (check for a Better Auth session cookie via `getSessionCookie`, redirect to `/login?redirect=<path>` if absent) is unchanged — this is a file-rename-and-export-rename fix, not a behavior change.
+
+**DD-018 — Prisma's `Json` field inputs (`Variant.threeActOutline`) require a double cast (`as unknown as Prisma.InputJsonValue`) from a plain TS interface, not a direct cast.**
+Rationale: Prisma's generated `InputJsonObject` type requires a string index signature; `ThreeActOutline` (a plain `{act1, act2, act3}` interface, matching both the AI service's Pydantic schema and the frontend's display components) doesn't structurally have one even though every field is JSON-compatible at runtime. TypeScript refuses the direct cast ("neither type sufficiently overlaps") and requires routing through `unknown` first. Fixed once in `frontend/src/lib/mappers.ts` (`fromVariantPayload`), not re-solved at each of the three call sites (project creation, brief regeneration, refinement) that create `Variant` rows.
+
+**DD-019 — Prisma migration is blocked on Supabase's direct-connection endpoint being IPv6-only, unreachable from this environment (IPv4-only outbound).**
+Rationale: not a code issue — confirmed directly. `db.<project-ref>.supabase.co:5432` resolves only to an IPv6 address (`getent hosts` confirmed); `/dev/tcp` connection attempt returned "Network is unreachable." This is a documented Supabase characteristic (direct connections are IPv6; their connection pooler, Supavisor, is the IPv4-compatible option, typically `aws-0-<region>.pooler.supabase.com:6543`). User needs to swap `DATABASE_URL` in `frontend/.env` to the pooler connection string from their Supabase dashboard (Project Settings → Database → Connection String → "Transaction pooler"). Tracked in Known Issues — this is the single blocker preventing real end-to-end verification of everything else built this session.
+
+**DD-020 — FR-08 export (PDF/text) generates on-demand and streams directly to the browser (`Content-Disposition: attachment`) rather than persisting to blob storage.**
+Rationale: the Prisma schema has an `Export` model (audit trail, per the original plan), but no object storage (S3/R2/Supabase Storage/etc.) is provisioned, and standing that up is a distinct, deferred task — not something to half-implement by writing `Export` rows with a `fileUrl` that points nowhere real. PDF rendering uses `pdf-lib` directly (no headless-browser/React-PDF dependency) — simple enough for the current export content (structured text sections) that a heavier renderer isn't justified yet. When object storage exists, this becomes: render once, upload, persist the `Export` row with a real URL, serve via redirect — a clean extension point, not a rewrite.
+
+**DD-021 — `DATABASE_URL` uses Supabase's session-mode pooler (port 5432), not transaction-mode (port 6543), despite transaction mode being the connection string Supabase's UI suggests by default.**
+Rationale: with the correct pooler *host* (fixing DD-019's IPv6 issue) but transaction-mode port 6543, `prisma migrate dev` connected successfully but then hung indefinitely with zero progress — reproduced, not assumed. Root cause: transaction-mode pooling (Supavisor/PgBouncer transaction mode) multiplexes connections per-transaction and doesn't support session-persistent features like the advisory locks `prisma migrate` uses to coordinate schema changes safely. Session mode (same host, port 5432) gives each client a dedicated backend connection for the session's duration, which supports advisory locks and prepared statements — migration succeeded immediately after switching only the port. Prisma's usual recommendation for this exact problem is a separate `directUrl` (migrations) vs. pooled `url` (runtime) pair in the datasource block, but Prisma 7's config (`@prisma/config`'s `Datasource` type) only exposes `url`/`shadowDatabaseUrl` — no `directUrl` field — so `DATABASE_URL` alone does double duty here. Trade-off accepted: session mode holds a backend connection per active session (less efficient multiplexing than transaction mode) rather than per-transaction, which is a non-issue at this project's current scale and revisitable later if connection-pool exhaustion ever becomes real.
 
 ## 6. Dependencies
 
@@ -143,131 +198,207 @@ Rationale: local hooks (DD-014) only protect commits made on a machine that has 
 
 **Installed** (`frontend/`, Node — see `frontend/package.json` for exact versions): Next.js 16.2.10 (App Router, Turbopack), React 19.2.4, Tailwind CSS v4, `@base-ui/react` 1.6.0 (shadcn's underlying primitive library in this environment — see DD-006, not Radix), `lucide-react` (icons), `sonner` (toasts), `class-variance-authority` + `tailwind-merge` (shadcn styling utilities), `next-themes` (dark/light theming, now wired — DD-011). shadcn components installed: button, card, input, select, textarea, badge, tabs, checkbox, slider, separator, label, radio-group, scroll-area, tooltip, sheet, dialog, table, skeleton, sonner, progress. (`form` was attempted but is an empty stub in this registry — see DD-012.)
 
-**Installed** (`frontend/`, Phase 2 architecture redesign): `prisma` + `@prisma/client` 7.8.0, `@prisma/adapter-pg` + `pg` + `@types/pg` (driver adapter, DD-009), `better-auth` 1.6.23 + `@better-auth/prisma-adapter` (auth, DD-008), `zod` 4.4.3, `@tanstack/react-query` (server state), `react-hook-form` 7.81.0 + `@hookform/resolvers` 5.4.0 (forms), `motion` (animation, not yet used), `cmdk` (command palette, not yet used).
+**Installed** (`frontend/`, Node): `prisma` + `@prisma/client` 7.8.0, `@prisma/adapter-pg` + `pg` + `@types/pg` (driver adapter, DD-009), `better-auth` 1.6.23 + `@better-auth/prisma-adapter` (auth, DD-008), `zod` 4.4.3, `@tanstack/react-query` (server state, now with real query hooks), `react-hook-form` 7.81.0 + `@hookform/resolvers` 5.4.0 (forms), `server-only` (guards `db.ts`/`ai-service-client.ts` from client-side import), `pdf-lib` (PDF export, DD-020), `tsx` (dev dep, runs `prisma/seed.ts`), `motion` (animation, still not yet used), `cmdk` (command palette, still not yet used).
+
+**Installed** (`ai-service/.venv`, Python 3.12 — new this session): `fastapi` 0.139.0, `uvicorn[standard]` 0.51.0, `pydantic` 2.13.4, `pydantic-settings` 2.14.2, `openai` 2.45.0, `python-dotenv`, `httpx`, `ruff` (lint). Full list in `ai-service/requirements.txt` (`pip freeze` output).
 
 ## 7. Environment Variables
 
-**Two separate `.env` files** — Next.js/Prisma only read `frontend/.env`, not the root one; `ai/eval/` only reads the project-root `.env`. Both are gitignored; templates are committed.
+**Three separate `.env` files now** — Next.js/Prisma only read `frontend/.env`; `ai/eval/` only reads the project-root `.env`; the AI service only reads `ai-service/.env`. All gitignored; templates committed.
 
 Root `.env` (from `.env.example`):
 | Variable | Purpose | Required for |
 |---|---|---|
-| `NVIDIA_API_KEY` | Auth for NVIDIA NIM hosted inference (from build.nvidia.com) | Milestone 1.1 (baseline eval) onward |
-| `NVIDIA_NIM_BASE_URL` | NIM OpenAI-compatible endpoint base URL (defaults to hosted endpoint) | Milestone 1.1 onward |
+| `NVIDIA_API_KEY` | Auth for NVIDIA NIM hosted inference (from build.nvidia.com) | Milestone 1.1 (baseline eval) — set, rotated after the DD-013 incident |
+| `NVIDIA_NIM_BASE_URL` | NIM OpenAI-compatible endpoint base URL | Milestone 1.1 |
 
-`frontend/.env` (from `frontend/.env.example`):
+`frontend/.env` (from `frontend/.env.example`) — **all set except `DATABASE_URL` needs the pooler variant (DD-019)**:
+| Variable | Purpose | Status |
+|---|---|---|
+| `DATABASE_URL` | Postgres connection string | Set, but points at Supabase's IPv6-only direct connection — **blocking**, needs the pooler string (DD-019) |
+| `BETTER_AUTH_SECRET` | Session signing secret | Set |
+| `BETTER_AUTH_URL` | Base URL for auth callbacks | Set |
+| `AI_SERVICE_URL` | Internal AI service base URL | Set (defaults to `http://localhost:8000`) |
+| `AI_SERVICE_SHARED_SECRET` | Server-to-server auth between BFF and AI service | Empty — fine for local dev (both sides treat an unset secret as "skip the check"), must be set before any real deployment |
+
+`ai-service/.env` (from `ai-service/.env.example`) — **not yet created**:
 | Variable | Purpose | Required for |
 |---|---|---|
-| `DATABASE_URL` | Postgres connection string (user's hosted instance — Neon/Supabase/etc., user-confirmed they have one) | Prisma migrate + runtime client, blocking right now |
-| `BETTER_AUTH_SECRET` | Session signing secret (user generates via `openssl rand -base64 32`) | Better Auth, blocking right now |
-| `BETTER_AUTH_URL` | Base URL for auth callbacks (defaults to `http://localhost:3000`) | Better Auth |
-| `AI_SERVICE_URL` | Internal AI service base URL | AI service sub-milestone (not started) |
-| `AI_SERVICE_SHARED_SECRET` | Server-to-server auth between BFF and AI service | AI service sub-milestone (not started) |
+| `MODEL_PROVIDER` | `mock` (default) or `nim` | Everything — this is the DD-016 plug-and-go switch |
+| `NIM_API_KEY`, `NIM_BASE_URL`, `NIM_MODEL_NAME` | Only needed when `MODEL_PROVIDER=nim` | Real generation |
+| `AI_SERVICE_SHARED_SECRET` | Must match `frontend/.env`'s value | Production deployment |
 
-**Action required from user (both still outstanding):**
-1. Root: copy `.env.example` to `.env`, set `NVIDIA_API_KEY` — blocks Milestone 1.1 execution.
-2. `frontend/`: copy `.env.example` to `.env`, set `DATABASE_URL` (your hosted Postgres) and `BETTER_AUTH_SECRET` (generate yourself) — blocks `prisma migrate` and any real auth testing.
-
-Neither requested via chat (secret hygiene) — set them directly in the files.
+**Action required from user:** update `frontend/.env`'s `DATABASE_URL` to the Supabase connection-pooler string (Project Settings → Database → Connection String → "Transaction pooler") — the single remaining blocker (DD-019). Everything else is either set or has a working default (`MODEL_PROVIDER=mock` means `ai-service/.env` doesn't even need to exist for the mock-provider path).
 
 ## 8. External Services
 
 | Service | Purpose | Status |
 |---|---|---|
-| NVIDIA NIM (build.nvidia.com) | Hosted LLM inference (OpenAI-compatible API) | Key available (user-confirmed); not yet called — `.env` not created |
-| PostgreSQL (user's hosted instance) | Single source of truth for all product data (DD-007) | User confirmed they have an instance; connection string not yet provided — `frontend/.env` not created, migration blocked |
+| NVIDIA NIM (build.nvidia.com) | Hosted LLM inference (OpenAI-compatible API) | Key set (rotated post-DD-013), reachable — but see §16 for real reliability findings from actual use |
+| PostgreSQL (Supabase, user-hosted) | Single source of truth for all product data (DD-007) | Instance exists; connection string set but unusable as-is (DD-019, IPv6) — blocking |
+| AI Service (`ai-service/`, internal) | AI orchestration, called only by the BFF | Built, running locally, verified against mock provider |
 
 ## 9. AI Models
 
-No model selected yet — this is the primary output of Milestone 1.1 (LLM Baseline Evaluation). Candidate models to evaluate on NIM (creative long-form generation + instruction following):
-- `meta/llama-3.3-70b-instruct` (primary candidate)
-- `nvidia/llama-3.1-nemotron-70b-instruct` (NVIDIA-tuned alternate)
-- `mistralai/mixtral-8x22b-instruct-v0.1` (diversity/comparison baseline)
+Milestone 1.1's original 3 candidates (`meta/llama-3.3-70b-instruct`, `nvidia/llama-3.1-nemotron-70b-instruct`, `mistralai/mixtral-8x22b-instruct-v0.1`) were **not usable** as evaluated: 2 of 3 aren't entitled on this NIM account at all (fast 404), and the Meta Llama models hung indefinitely under shared-tier queue congestion (441 requests queued, confirmed via NVIDIA's own UI). Switched to a second candidate set, all confirmed both entitled and fast in direct testing:
+- `nvidia/nemotron-3-nano-30b-a3b` — fast (0.6s), but **unreliable at the actual task**: reproduced directly, it spends its token budget on chain-of-thought reasoning and, even with an 8192-token budget removing truncation as a factor, produces meta-commentary about the JSON format instead of the actual content. Not used.
+- `deepseek-ai/deepseek-v4-flash` — mostly failed JSON parsing in initial testing due to a few characters of reasoning-text leakage before the JSON object (fixed harness-side via defensive JSON extraction, `parse_json_object` — see `ai/eval/json_utils.py` and `ai-service/app/core/json_utils.py`); not fully re-validated after the fix.
+- `minimaxai/minimax-m3` — **current default** (`ai-service/.env.example`'s `NIM_MODEL_NAME`). Confirmed reliable and high-quality in direct testing (valid JSON, coherent on-brief creative output) once given an adequate token budget. **However:** the one full 42-case Milestone 1.1 evaluation attempt against this model failed 42/42 with `DEGRADED function cannot be invoked` — NVIDIA's own hosted deployment of this model went down entirely mid-attempt. This is a real, observed reliability event, not a config problem; the AI service's `NimProvider` has the timeout/retry infrastructure to fail fast and cleanly when this happens, but cannot make a genuinely-down upstream model work.
 
-Final selection and rationale will be recorded here after Milestone 1.1 completes.
+**Net conclusion:** NVIDIA's shared/free-tier hosted endpoint has shown three distinct failure modes in real testing this project (queue congestion, token-budget/reasoning-model confusion, full model outage) across every model tried. This is exactly why DD-016 (pluggable provider, `MockProvider` default) exists — the rest of the system does not depend on NIM's uptime to be built, verified, or demoed. Milestone 1.1's formal baseline evaluation report is still not completed (see Pending Tasks) — the harness works, but a stable enough window against real NIM hasn't occurred yet to generate real numbers.
 
 ## 10. NVIDIA Technologies
 
 | Technology | Role | Status |
 |---|---|---|
-| NIM | Core LLM serving for plot generation | In use starting Milestone 1.1 |
-| NeMo Guardrails | Censorship/content policy enforcement | Planned, Phase 2 |
-| Triton Inference Server | Concurrent request handling | Planned, Phase 2 |
-| TensorRT-LLM | Inference latency optimization | Planned, Phase 4 |
+| NIM | Core LLM serving for plot generation | Integrated (`ai-service/app/core/providers/nim_provider.py`); real-world reliability has been poor so far — see §9 |
+| NeMo Guardrails | Censorship/content policy enforcement | Not yet integrated — tracked in Pending Tasks |
+| Triton Inference Server | Concurrent request handling | Planned, later — addable behind `ModelProvider` (DD-016) without touching the BFF or AI service's public API |
+| TensorRT-LLM | Inference latency optimization | Planned, later (same note) |
 | CUDA | Underpins GPU inference | N/A directly — using hosted NIM endpoint, not self-managed GPU infra |
 | NVIDIA AI Enterprise | Support/licensing wrapper | Out of scope — hackathon-scale, hosted API only |
 
 ## 11. Prompt Strategy
 
-Pending — to be authored in Milestone 1.2 (Prompt Architecture Document v1), informed by Milestone 1.1 baseline findings.
+Implemented directly in `ai-service/app/core/providers/nim_provider.py` (generate/refine/validate prompt templates, evolved from `ai/eval/prompt_template.py` + `judge.py`) rather than as a separate standalone document — Milestone 1.2's originally-planned "Prompt Architecture Document" is superseded by this real, working implementation. Key learned constraints baked in: reasoning models need an 8192-token generation budget (not the original 2048) to leave room for chain-of-thought before the actual JSON answer; `response_format: json_object` is necessary but not sufficient — defensive extraction (`parse_json_object`, strips to the outermost `{...}`) is still needed for models that leak a few characters of reasoning around otherwise-valid JSON.
 
 ## 12. Current Phase
 
 **Phase 2 — Platform Foundation & Redesign** (supersedes the source plan's original Phase 2/Phase 3 split — see §1 and the approved plan at `/home/samarth/.claude/plans/foamy-tinkering-wreath.md`)
 Objective: replace the Phase 1 wireframe's mock-data/no-backend foundation with the real hybrid architecture (Next.js BFF + Postgres + Better Auth, internal Python AI service) and a production-grade design system, per user-approved plan.
 
-Sub-milestones (execution order, one at a time, same discipline as Phase 1):
-1. **Foundation** — Postgres/Prisma, Better Auth, design tokens ← **current**
-2. AI service evolution — `ai/` → `ai-service/`, FastAPI, `/internal/generate|refine|validate`
-3. BFF API layer — Route Handlers, Zod validation, TanStack Query hooks, constraint taxonomy served from DB
-4. Core screens rebuilt — dashboard, brief wizard, project home, variant detail on real data + new design system + motion
-5. Polish — command palette, empty/loading/error states, accessibility, PostHog + Pino
+Sub-milestones:
+1. **Foundation** — Postgres/Prisma, Better Auth, design tokens — **built and verified against real DB**
+2. **AI service evolution** — `ai-service/`, FastAPI, pluggable `ModelProvider`, `/internal/generate|refine|validate` — **built and verified end-to-end (mock provider)**; real-NIM path built but not reliably verified (§9)
+3. **BFF API layer** — Route Handlers, Zod validation, TanStack Query hooks, constraint taxonomy served from DB — **built and verified against real DB**
+4. **Core screens rebuilt** — dashboard, brief wizard, project view, variant detail on real data + new design system — **built**; screen logic verified via the API-level end-to-end pass (motion/animation polish, and an actual in-browser click-through, still outstanding — no browser automation tool in this environment)
+5. **Polish** — command palette, PostHog, Pino, motion — **not started**
 
-Phase 1 (Design & AI Foundation) is not abandoned — its still-open item (Milestone 1.1 execution, blocked on `NVIDIA_API_KEY`) remains outstanding and will resume once unblocked; its findings still feed the AI service's prompt design in Phase 2 sub-milestone 2. Milestone 1.2 (Prompt Architecture Doc + Variant Output Schema v1) is superseded by Phase 2 sub-milestone 2's `/internal/generate` contract and sub-milestone 3's Prisma schema — no separate standalone deliverable needed now that there's a real schema.
+The user's mid-Phase-2 request ("complete the whole project... leave the model part as a separate module... plug and go") drove sub-milestones 2–4 to be built together in one push rather than strictly sequentially, since they're tightly coupled (BFF routes need the AI service to call, screens need the BFF routes to call) — see Development Log for the full sequence. This is a justified reordering, not a skipped step: every sub-milestone's actual deliverables exist in code and are now DB-verified (except sub-milestone 5, genuinely not started).
+
+Phase 1's still-open item (Milestone 1.1 full evaluation) remains genuinely incomplete — not for lack of trying, but because real NIM usage this session surfaced three distinct reliability failures (queue congestion, a reasoning model unable to do the task, a full model outage mid-run). See §9 for the detailed trail.
 
 ## 13. Current Milestone
 
-**Sub-milestone 2.1 — Foundation**
-Status: **in progress.** Done: Prisma schema written and validated (`frontend/prisma/schema.prisma`, verified against Better Auth's own CLI generator — DD-010), driver-adapter wiring (`src/lib/db.ts`, DD-009), Better Auth config with org-per-user auto-provisioning (`src/lib/auth.ts`, DD-008), auth route handler + client hooks, minimal working `/login` and `/signup` pages (React Hook Form + Zod), full design-token overhaul (color/typography/elevation, DD-011) plus dark-mode theming now actually wired (was a latent unwired dependency before this sub-milestone). `next build` and `eslint` both pass clean.
+**Sub-milestones 2.1 through 2.4 — code-complete and verified end-to-end against the real database.**
 
-**Blocked:** cannot run `prisma migrate` or exercise auth end-to-end until `frontend/.env` has a real `DATABASE_URL` and `BETTER_AUTH_SECRET` (user action, see §7 — not yet done). Everything above has been validated by type-checking and building against a dummy `DATABASE_URL`, not against a live database — first real migration is the next action on unblock.
+`prisma migrate dev` succeeded (after DD-021's session-pooler fix) and `prisma db seed` populated 70 constraint options. A full real HTTP-request pass — signup, org auto-provisioning, taxonomy fetch, project creation with real generation, variant detail, refinement, PDF/text export, regeneration, auth-gating, validation rejection — was exercised end-to-end and passed (see §2 for the exact sequence). Test data was created and cleaned up afterward, not left in the database.
+
+**What's still genuinely outstanding:** sub-milestone 2.5 (polish — command palette, motion, PostHog, Pino) hasn't been started. An actual in-browser click-through hasn't happened (no browser automation tool in this environment) — the API-level verification is thorough but isn't a substitute for seeing the UI render and interact correctly. A stable, complete Milestone 1.1 baseline evaluation against real NIM still doesn't exist (§9).
 
 ## 14. Completed Milestones
 
-**Milestone 1.0 — Environment & Foundation Setup.** Delivered: project-scoped git repo, monorepo skeleton, `docs/constraint-taxonomy-v1.md`, this file. See Development Log Entry 1.
+**Milestone 1.0 — Environment & Foundation Setup.** See Development Log Entry 1.
 
-**Milestone 1.3 — UI Wireframes (source plan M3).** Delivered: Next.js 16 + shadcn/ui (Base UI-backed, see DD-006) app in `frontend/`, four screens (dashboard, constraint input, variant display/comparison, variant detail with refinement + export), mock data layer typed against the same shape validated in the Milestone 1.1 prompt template. Superseded incrementally by Phase 2 sub-milestone 4 (screens rebuilt on real data + new design system) — not deleted yet, still the only working UI for the app's core flow. See Development Log Entry 3.
+**Milestone 1.3 — UI Wireframes (source plan M3).** Superseded and replaced by Phase 2 sub-milestone 4's real-data screens this session — `mock-data.ts`, the old `constraint-taxonomy.ts`, and the generic `/variants` list page are all deleted, zero references remain.
+
+**Phase 2, sub-milestones 2.1–2.4 — complete and DB-verified.** See Development Log for the full build sequence — AI service with pluggable provider (DD-016), full BFF API layer, all screens rewired to real data, auth-gated routing, real Postgres migration + seed (DD-021), full end-to-end verification pass.
 
 ## 15. Pending Tasks
 
-**Phase 1 (still open, blocked on user action):**
-- [ ] Milestone 1.1 execution — run `triage` then `full` against NIM once root `.env`'s `NVIDIA_API_KEY` is set; pick winning model; write findings into design.md §9
+**Phase 2, sub-milestone 2.5 (Polish) — not started:**
+- [ ] Command palette (`cmdk`, installed, unused)
+- [ ] Motion/animation pass (`motion`, installed, unused) — design.md's approved plan §7 (motion principles) not yet applied to any real screen
+- [ ] PostHog analytics, Pino logging — not installed
+- [ ] Accessibility pass
+- [ ] Empty/loading/error states exist per-screen already (built pragmatically alongside each feature) but haven't had a dedicated consistency pass
 
-**Phase 2 (current):**
-- [ ] Sub-milestone 2.1 (Foundation) — run `prisma migrate dev` once `frontend/.env` has `DATABASE_URL` + `BETTER_AUTH_SECRET`; smoke-test signup/login end-to-end
-- [ ] Sub-milestone 2.2 — AI service evolution (`ai/` → `ai-service/`, FastAPI, internal API)
-- [ ] Sub-milestone 2.3 — BFF API layer (Route Handlers, TanStack Query hooks, constraint taxonomy seeded from `docs/constraint-taxonomy-v1.md` into `ConstraintOption`)
-- [ ] Sub-milestone 2.4 — Core screens rebuilt on real data + new design system (dashboard, brief wizard, project home, variant detail); delete `frontend/src/lib/mock-data.ts`, `types.ts`, `constraint-taxonomy.ts` once their real replacements exist
-- [ ] Sub-milestone 2.5 — Command palette, empty/loading/error states, accessibility pass, PostHog + Pino
+**AI service / Milestone 1.1 follow-through:**
+- [ ] NeMo Guardrails integration — not started, real dependency for the hackathon's graded deliverables (source plan §7.2)
+- [ ] Get a real, complete Milestone 1.1 baseline evaluation run against NIM once the platform is stable enough to sustain one (§9) — the harness and AI service are both ready; NVIDIA's endpoint hasn't cooperated yet
+- [ ] Re-validate `deepseek-ai/deepseek-v4-flash` with the defensive JSON parsing fix in place (was fixed but not re-tested at scale)
+- [ ] Full censorship rule bodies per rating level (CT-07 gap) — needed once NeMo Guardrails work starts
 
-**Carried over from Phase 1, still relevant:**
-- [ ] `frontend/` has no test setup (no Jest/Vitest/Playwright) — needed before Phase 2 sub-milestone 4 ships real screens
-- [ ] Real human/team wireframe review of Phase 1 screens never happened (solo execution) — largely moot now since those screens are being rebuilt, not preserved
+**Carried over, lower priority:**
+- [ ] `frontend/` and `ai-service/` have no automated test suite (no Jest/Vitest/pytest) — the verification done this session was build/lint/typecheck/manual-curl, not unit/integration tests
+- [ ] Object storage for `Export` persistence (DD-020) — export works today via on-demand streaming, but there's no download history
 
-Deferred (not needed yet / not applicable to solo execution):
-- GPU cluster provisioning — N/A, using hosted NIM endpoint; Triton/TensorRT-LLM addable later per DD-007
-- Full censorship rule bodies per rating level (CT-07 gap) — AI service (sub-milestone 2.2) dependency, tracked in Known Issues
+**Recommended immediate next step (not blocking, just next):**
+- [ ] A real human click-through in an actual browser (`cd frontend && npm run dev`, both dev servers are already running from this session) — the API-level verification is thorough but no visual/interaction check has happened, since this environment has no browser automation tool
+
+Deferred (not needed yet):
+- GPU cluster provisioning, Triton, TensorRT-LLM — addable behind the `ModelProvider` interface (DD-016) without touching the BFF or the AI service's public API, whenever real GPU infra exists
 
 ## 16. Known Issues
 
-- **Milestone 1.1 execution attempt (post-key-rotation) is blocked by what appears to be an NVIDIA-side issue, not a harness bug.** With a confirmed-valid, freshly-rotated `NVIDIA_API_KEY`, direct raw HTTP calls (bypassing the harness entirely) show: `/v1/models` and non-entitled models both respond correctly and fast (200 / clean 404); but the two Meta Llama models this account *is* entitled to (`meta/llama-3.1-8b-instruct`, `meta/llama-3.3-70b-instruct`) hang with zero response — no headers, no error — in both streaming and non-streaming mode, confirmed across multiple attempts several minutes apart (ruling out simple key-propagation delay). `nvidia/llama-3.1-nemotron-70b-instruct` and `mistralai/mixtral-8x22b-instruct-v0.1` (2 of the 3 original candidate models, §9) are not entitled/available on this account at all (fast 404 / not in `/v1/models` catalog) — the candidate list in §9 needs revisiting once generation works at all, likely narrowing to Llama-family models this account can actually reach. User is checking the build.nvidia.com dashboard/playground directly to isolate whether this is account-specific or a platform-wide incident. **Separately and regardless of root cause:** found and fixed a real robustness bug in `ai/eval/nim_client.py` — the `openai` SDK's default timeout is 600s with its own internal retries on top, so a single hung request could've silently blocked 20+ minutes before the harness's own retry/backoff logic ever saw an error. Now: explicit 45s timeout, SDK-internal retries disabled (single retry policy, in `NimClient`), and per-case progress logging added to `runner.py` so a stuck run is visible in real time instead of going silent.
+- **NVIDIA NIM's shared/free-tier hosted endpoint has shown three distinct real reliability failures during this project** (queue congestion — 441 requests queued; a reasoning model, nemotron-3-nano, unable to complete the actual task even with an adequate token budget; and a full model deployment outage — `minimax-m3` returned `DEGRADED function cannot be invoked` on 42/42 cases in the one full evaluation attempt). None of these are harness bugs — all reproduced with raw HTTP calls bypassing all project code. See §9 for the full trail. This is *why* DD-016's `MockProvider` exists as the default — the system doesn't depend on NIM's uptime to be built or demoed, but real generation quality/reliability numbers (Milestone 1.1's actual purpose) still don't exist yet.
 - **Stray whole-drive git repo at `/media/samarth/DataFiles/.git`** — `core.worktree = D:/`, a broken leftover from a Windows dual-boot setup. All git commands against it fail. Left untouched; do not use. This project's repo is `project/.git` (see DD-004).
-- **CT-07 rating-level content rules not yet encoded** — the taxonomy defines the *levels* (e.g. MPAA `PG-13`) but not the specific content rules per level (violence detail, language, sexual content thresholds). Required before Phase 2 NeMo Guardrails integration; not a Phase 1 blocker.
-- **Multilingual coverage in Milestone 1.1 is a subset (4 of 11 languages in CT-06).** Full-language sign-off deferred until real usage data suggests which additional languages are worth evaluating.
-- **No browser automation/screenshot tool available in this environment.** Milestone 1.3's wireframes were verified via `next build` (type-check), `eslint`, and a running dev server checked with `curl` (HTTP status codes + presence of expected rendered text on every route, absence of error-overlay markers) — not an actual visual/pixel or interaction check. Recommend an actual human click-through in a real browser (`cd frontend && npm run dev`) before treating the layouts as final. Same caveat applies to the new design tokens/dark theme and the login/signup pages — verified by build/typecheck only, not visually.
-- **`frontend/.env` and root `.env` now both exist on disk** (user created them directly, not via chat). `prisma migrate` still hasn't actually been run against a real database yet — Prisma schema and Better Auth config have only been validated by `next build`/`tsc` against a dummy `DATABASE_URL`. Next action on resuming sub-milestone 2.1: run the real migration and smoke-test signup/login.
-- **No git remote configured.** A GitHub remote (`origin`) was added and pushed to outside this conversation at some point during Phase 2, without any commit review step — this is how a leaked secret reached a **public** repo undetected (see DD-013 and the Development Log incident entry). The repo has since been deleted by the user and local git history fully wiped (`rm -rf .git && git init`) — this project currently has **zero commits and no remote**. Before adding a remote again: confirm `.gitignore` coverage and do a `git status`/`git diff` review of anything about to be committed, especially any `.env*` file.
-- **`.github/workflows/ci.yml` has never actually run on GitHub Actions** — no remote to push to yet (see above). Validated as much as possible locally (YAML parses, `prek run --all-files` — the same checks the workflow runs — passes clean against every file including the workflow file itself), but the workflow's own execution (correct job/step syntax, action versions resolving, etc.) is unverified until the first real push. Treat the first push as this workflow's real test, not a formality.
+- **CT-07 rating-level content rules not yet encoded** — the taxonomy defines the *levels* (e.g. MPAA `PG-13`) but not the specific content rules per level. Required before NeMo Guardrails integration (still not started).
+- **Multilingual coverage in Milestone 1.1's test set is a subset (4 of 11 languages in CT-06).**
+- **No browser automation/screenshot tool available in this environment.** Every screen this session was verified at the API/data level (real HTTP requests, §2) and via `next build`/`tsc --noEmit`/`eslint` — not an actual visual/pixel or interaction check in a browser. See Pending Tasks — recommend a real click-through next.
+- **No git remote configured.** Deliberate, since the last remote (added outside this conversation, no review step) leaked a secret to a public repo — see DD-013. Local history was wiped and reinitialized; this project currently has **zero commits and no remote**. Before adding a remote again: confirm `.gitignore` coverage and review `git status`/`git diff` before the first push, especially for any `.env*` file.
+- **`.github/workflows/ci.yml`'s three jobs have never run on real GitHub Actions** — no remote to push to. Validated locally as much as possible (YAML parses, `prek run --all-files` passes clean including against the workflow file itself). Treat the first push as this workflow's actual first test.
+- **AI service has no automated tests** — verification was manual (`curl` against all 4 endpoints, both standalone and through the full BFF path) and lint/typecheck, not a pytest suite.
+- **`ai-service/.env` doesn't exist yet** — not needed for the default `MODEL_PROVIDER=mock` path (which is what's been verified end-to-end), but required before `MODEL_PROVIDER=nim` can be tested through the full BFF→AI-service path rather than direct `ai/eval/` scripts.
 
 ## 17. Technical Debt
 
-None yet — project is freshly scaffolded.
+- **No automated test suite anywhere** (`frontend/`, `ai/`, `ai-service/`) — every verification this session was build/lint/typecheck/manual-curl. Fine for a fast-moving build phase, but real tests (especially around the BFF↔AI-service contract and the constraint-taxonomy seed/serve round-trip) should land before this goes much further.
+- **`Export` Prisma model is unused** (DD-020) — export works via on-demand streaming, but there's no download history, and the model sits in the schema unreferenced by any query. Either wire it up once object storage exists, or reconsider whether it belongs in the schema at all if on-demand-only turns out to be sufficient.
+- **`ai-service`'s `NimProvider` and `ai/eval`'s `nim_client.py` duplicate similar timeout/retry/JSON-parsing logic** (by design — DD-016's rationale was independent deployability of the AI service — but worth a second look if the two ever drift in behavior instead of just in dependencies).
 
 ## 18. Future Improvements
 
 - RAPIDS-accelerated constraint-failure analytics (source plan §7.7) — optional, only if core functionality is ahead of schedule by Phase 4.
 
 ## 19. Development Log
+
+### Entry 9 — Public landing page added (IA gap fix)
+**Logical time:** Immediately after Entry 8
+**Task completed:** User noticed there was no public landing page — `/` was the authenticated dashboard itself, so unauthenticated visitors hit an instant redirect to `/login` with nothing public to see. This was a real gap against the originally-approved architecture plan (§1 references it: "/ marketing landing (unauthenticated)... /app dashboard"), silently cut during Entry 7's "build the whole thing" push without being flagged at the time. Fixed properly rather than patched around: moved the dashboard to `/dashboard`, built a real public landing page at `/` (hero, feature grid, session-aware CTA — "Get started" for logged-out visitors, "Go to dashboard" for logged-in ones), and updated every path that assumed `/` was the dashboard.
+**Files created:** `frontend/src/app/page.tsx` (new — public landing), `frontend/src/app/dashboard/page.tsx` (moved from `frontend/src/app/page.tsx`, content unchanged)
+**Files modified:** `frontend/src/proxy.ts` (switched `PUBLIC_PATHS` to an exact-match `Set` including `"/"` — prefix-matching `"/"` would have made every route public, a real bug avoided by design, not by luck), `frontend/src/components/app-shell.tsx` (same exact-match fix for `CHROME_LESS_PATHS`, nav links + logo now point at `/dashboard`), `frontend/src/app/login/page.tsx` + `signup/page.tsx` (post-auth redirect default changed from `/` to `/dashboard`), `frontend/src/app/projects/[id]/page.tsx` + `variants/[id]/page.tsx` ("Back to dashboard" links updated).
+**Files deleted:** none
+**Reason for change:** direct user observation of a real product gap.
+**Architectural decisions:** none new — this restores the originally-approved IA (see the plan file referenced in §1) rather than introducing a new one.
+**Verification:** `next build`/`eslint` clean; confirmed via curl against the running dev server: `GET /` → 200 with landing page content, `GET /dashboard` (no session) → 307 redirect to `/login?redirect=%2Fdashboard`. Grepped the whole `frontend/src` tree for any remaining `href="/"` or `push("/")` assuming the old routing — none found.
+**Known issues:** none new.
+**Next recommended task:** same as Entry 8 — a real browser click-through, sub-milestone 2.5 polish, or resuming Milestone 1.1's NIM evaluation.
+
+### Entry 8 — Real database connected; full system verified end-to-end
+**Logical time:** Immediately after Entry 7
+**Task completed:** Fixed the Postgres connection (two distinct real issues, not one), ran the first real migration and seed, then exercised the complete signup→generate→refine→export flow with real HTTP requests against the running dev server.
+
+**Connection issue #1 (DD-019, already known):** Supabase's direct connection (`db.<ref>.supabase.co:5432`) is IPv6-only; this sandbox has no IPv6 route. User initially re-provided the same direct-connection string twice before finding Supabase's dashboard had moved connection strings behind a "Connect" button rather than the Database Settings page. Guided them to the pooler-specific connection string instead.
+
+**Connection issue #2 (new — DD-021):** with the correct pooler *host*, `prisma migrate dev` connected but then hung indefinitely with zero output for several minutes — not slow, actually stuck. Diagnosed rather than assumed: the connection string used transaction-mode pooling (port 6543), which doesn't support the session-persistent advisory locks `prisma migrate` needs. Verified port 5432 (session mode) was reachable on the same host before touching anything, then switched only the port number in `frontend/.env` (not a full credential rewrite) — migration succeeded immediately.
+
+**First real migration + seed:** `prisma migrate dev --name init` created every table from `schema.prisma` in the live database. `prisma db seed` populated 70 `ConstraintOption` rows across 9 dimensions from `docs/constraint-taxonomy-v1.md`.
+
+**End-to-end verification (real HTTP requests, cookie-jar session, against `localhost:3001` + the AI service at `localhost:8000`):** signed up a test user (`POST /api/auth/sign-up/email`) → confirmed org auto-provisioning fired (DD-008's database hook) → fetched the real seeded taxonomy → created a project with a full 8-dimension brief, which triggered real generation through the AI service and persisted 3 distinct variants → fetched variant detail with nested relations → refined a variant (created a linked child Variant, confirmed AC-04-style structural preservation) → exported both `.txt` (well-formatted) and `.pdf` (confirmed via `file`, genuinely valid PDF 1.7) → regenerated a new brief version (version 2, 3 more variants) → confirmed unauthenticated requests redirect to `/login` (proxy.ts working) → confirmed malformed input gets a clean 400 (Zod validation working). Every piece built in Entry 7 actually works, not just compiles.
+**Files created:** none (verification only)
+**Files modified:** `frontend/.env` (`DATABASE_URL` — pooler host, then pooler port; no other content changed), `design.md` (§2, §5 DD-021, §12–16, this entry)
+**Files deleted:** temporary verification scripts (`/tmp/cleanup-e2e.ts`, curl response captures) — all cleaned up, not committed
+**Reason for change:** this was the one remaining blocker on everything built in Entry 7; closing it converts "built" into "verified working."
+**Architectural decisions:** DD-021 (session-pooler over transaction-pooler for `DATABASE_URL`, and why Prisma 7 can't split this into `directUrl`/`url` the old way).
+**Verification:** see above — this entire entry *is* the verification record. Test data (one user, one org, two projects, six variants) was created in the real Supabase database and then explicitly cleaned up afterward via a one-off script, not left behind.
+**Known issues:** no in-browser click-through yet (no browser automation tool); NIM reliability still unresolved (§9); no automated test suite (§16, §17).
+**Next recommended task:** either a real browser click-through of the running dev servers, or sub-milestone 2.5 (polish — motion, command palette, PostHog/Pino), or returning to Milestone 1.1's real NIM evaluation if NVIDIA's platform has stabilized.
+
+### Entry 7 — Full-stack build: AI service, BFF, frontend rewired end-to-end
+**Logical time:** Immediately after Entry 6, spanning the rest of the session
+**Task completed:** User asked to "complete the whole project frontend, backend, all the connections... leave the model part as a separate module... plug and go... build it end to end with all the phases." Built sub-milestones 2.2–2.4 together (AI service, BFF API layer, frontend rewrite) rather than strictly sequentially, since they're tightly coupled. Discovered and fixed several real bugs along the way rather than treating first-pass code as done.
+
+**AI service (`ai-service/`, new):** FastAPI app; `ModelProvider` abstract interface (DD-016) with `MockProvider` (deterministic, instant) and `NimProvider` (real NIM, carrying forward every lesson from Milestone 1.1's debugging — timeout, retry, defensive JSON parsing, 8192-token budget); 4 endpoints (`/health`, `/internal/generate`, `/internal/refine`, `/internal/validate`), shared-secret auth dependency. Verified end-to-end via direct curl against all 4 endpoints with the mock provider. Found and fixed a real bug during that verification: two variants got an identical logline because independent per-variant random draws happened to collide — fixed by shuffling an option pool once per call and cycling through by index instead.
+
+**BFF (`frontend/src/app/api/*`, `lib/*`, `hooks/*`, new):** `ai-service-client.ts` (server-only typed client), Zod validation (`lib/validations/brief.ts`), camelCase↔snake_case mappers (`lib/mappers.ts`), `session.ts` (org-scoped auth helper), 8 Route Handlers covering the full FR-01–FR-08 flow, PDF/text export via `pdf-lib` rendered on-demand (DD-020 — no object storage yet, so not persisted), a Prisma seed script transcribing `docs/constraint-taxonomy-v1.md` into `ConstraintOption`, and 3 TanStack Query hook modules.
+
+**Frontend rewrite:** every Phase 1 screen rewired from `mock-data.ts` to real API calls — dashboard (`useProjects`), brief form (`useConstraintTaxonomy` + `useCreateProject`, plus a new required "project title" field), a new `projects/[id]` page (replaces the old generic `/variants` list — a project's variants, not a global pool), variant detail (`useVariant`, real refine via `useRefineVariant`, real export triggering a browser download). `app-shell.tsx` became a client component with a real session-aware sign-out button. Deleted `mock-data.ts`, the old hardcoded `constraint-taxonomy.ts`, and the generic `/variants/page.tsx` — confirmed via grep that nothing referenced them before deleting.
+
+**Real bugs found and fixed while wiring this up (not just written once and left):**
+- Prisma 7's `Json` field inputs need `as unknown as Prisma.InputJsonValue`, not a direct cast — TS correctly refuses a plain interface without an index signature.
+- Next.js 16 renamed `middleware.ts` → `proxy.ts` (`export function proxy`, not `middleware`) — caught by the build's own deprecation warning, confirmed against the bundled docs before renaming (DD-017).
+- `useSearchParams()` on `/login` needed a `Suspense` boundary or the build fails outright — extracted the form into a child component, wrapped it.
+- Attempting `prisma migrate dev` against the real `DATABASE_URL` failed with `P1001: Can't reach database server` — root-caused to Supabase's direct connection being IPv6-only (`getent hosts` confirmed an IPv6-only A record; this sandbox has no IPv6 route) — DD-019. This is the one blocker left; everything else in this entry is code-complete and build/lint/typecheck-clean but DB-unverified.
+
+**Files created:** `ai-service/` (entire new service — see §3), `frontend/src/app/api/**` (8 route files), `frontend/src/lib/{ai-service-client,mappers,session,api-client,api-helpers,variants,export}.ts`, `frontend/src/lib/validations/brief.ts`, `frontend/src/hooks/{use-projects,use-variants,use-constraint-taxonomy}.ts`, `frontend/prisma/seed.ts`, `frontend/src/app/projects/[id]/page.tsx`, `frontend/src/proxy.ts` (renamed from a since-deleted `middleware.ts`).
+**Files modified:** `frontend/src/lib/types.ts` (real API types replacing the Phase 1 provisional shape), `frontend/src/components/{variant-card,variant-compare-table,export-dialog,refinement-panel,constraint-form,app-shell}.tsx`, `frontend/src/app/{page,login/page,variants/[id]/page}.tsx`, `frontend/prisma.config.ts` (seed wiring), `.pre-commit-config.yaml` + `.github/workflows/ci.yml` (ai-service coverage), `design.md` (this entry and nearly every section above).
+**Files deleted:** `frontend/src/lib/mock-data.ts`, `frontend/src/lib/constraint-taxonomy.ts` (Phase 1 hardcoded version), `frontend/src/app/variants/page.tsx`.
+**Reason for change:** direct user request to complete the full stack, explicitly asking for the model-provider abstraction that DD-016 delivers.
+**Architectural decisions:** DD-016 (pluggable `ModelProvider`), DD-017 (Next.js 16 proxy rename), DD-018 (Prisma Json cast), DD-019 (Supabase IPv6 blocker), DD-020 (on-demand export, no blob storage yet).
+**Verification:** `next build`, `tsc --noEmit`, `eslint` (frontend) and `ruff check` (both Python services) all clean; `prek run --all-files` 12/12 clean; AI service's 4 endpoints manually verified via curl against the mock provider. **Not verified:** anything requiring a live Postgres connection — see DD-019, this is the honest, primary gap.
+**Known issues:** see §16 — DATABASE_URL/IPv6, no automated test suite, NIM reliability findings, Export model unused pending object storage.
+**Next recommended task:** user fixes `DATABASE_URL` to the Supabase pooler string → run `prisma migrate dev` → smoke-test the full flow (signup → create project → generate against mock provider → refine → export) → only then consider sub-milestone 2.5 (polish) or revisiting real NIM generation.
 
 ### Entry 6 — GitHub Actions CI added (backstop for the local git hooks)
 **Logical time:** Immediately after Entry 5
@@ -355,55 +486,14 @@ None yet — project is freshly scaffolded.
 
 ## 20. Current Repository State
 
-```
-project/
-├── .env.example
-├── .gitignore
-├── CLAUDE.md
-├── design.md
-├── PS241_Script_Ideation_Assistant_Project_Plan.md
-├── ai/
-│   ├── .venv/                  (gitignored — Python 3.12 virtualenv)
-│   ├── eval/
-│   │   ├── __init__.py
-│   │   ├── README.md
-│   │   ├── nim_client.py       (NIM OpenAI-compatible async client + retry)
-│   │   ├── constraints.py      (machine-readable CT-01..CT-08 mirror)
-│   │   ├── test_prompts.py     (42-case curated test brief set)
-│   │   ├── prompt_template.py  (baseline/un-optimized generation prompt)
-│   │   ├── judge.py            (LLM-as-judge scorer)
-│   │   ├── diversity.py        (lexical pairwise diversity proxy)
-│   │   ├── runner.py           (CLI: triage / full)
-│   │   └── report.py           (markdown report renderer)
-│   └── prompts/                (empty — Milestone 1.2)
-├── docs/
-│   ├── adr/                    (empty — Phase 2+)
-│   ├── reports/                (empty until Milestone 1.1 executes; raw/ is gitignored)
-│   └── constraint-taxonomy-v1.md
-├── frontend/                    Next.js 16 BFF — Phase 1 screens still live, Phase 2 sub-milestone 2.1 (Foundation) in progress
-│   ├── .env.example             (DATABASE_URL, BETTER_AUTH_SECRET, BETTER_AUTH_URL, AI_SERVICE_URL, AI_SERVICE_SHARED_SECRET)
-│   ├── prisma/schema.prisma     (User/Session/Account/Verification + Organization/Project/Brief/GenerationRun/Variant/Refinement/Export/ConstraintOption/Comment/UsageEvent)
-│   ├── prisma.config.ts
-│   └── src/
-│       ├── app/
-│       │   ├── page.tsx                 (dashboard: hero + recent sessions — Phase 1, mock data)
-│       │   ├── layout.tsx                (root layout: ThemeProvider, QueryProvider, AppShell, TooltipProvider, Toaster)
-│       │   ├── create/page.tsx           (constraint input form — FR-01, Phase 1, mock data)
-│       │   ├── variants/page.tsx         (variant grid + comparison tabs — Phase 1, mock data)
-│       │   ├── variants/[id]/page.tsx    (variant detail + refine + export — Phase 1, mock data)
-│       │   ├── login/page.tsx, signup/page.tsx    (Phase 2, real Better Auth — NEW)
-│       │   └── api/auth/[...all]/route.ts          (Better Auth handler — NEW)
-│       ├── components/
-│       │   ├── app-shell.tsx, constraint-form.tsx, variant-card.tsx,
-│       │   │   variant-compare-table.tsx, export-dialog.tsx, refinement-panel.tsx   (Phase 1)
-│       │   ├── theme-provider.tsx, theme-toggle.tsx, query-provider.tsx              (Phase 2 — NEW)
-│       │   └── ui/                       (20 shadcn primitives; `form` is a registry stub, not used — DD-012)
-│       ├── lib/
-│       │   ├── constraint-taxonomy.ts, types.ts, mock-data.ts   (Phase 1 — to be deleted in sub-milestone 2.4)
-│       │   ├── db.ts, auth.ts, auth-client.ts                    (Phase 2 — NEW)
-│       │   └── validations/auth.ts                                (Phase 2 — NEW)
-│       └── generated/prisma/            (Prisma Client output — generated, gitignored)
-└── schemas/                    (empty — superseded by frontend/prisma/schema.prisma, see §12)
-```
+Full tree is documented in §3 (kept in one place rather than duplicated — §3 is now accurate as of this session's end, not a stale Phase 1 snapshot). Summary of what changed structurally this entry:
 
-Git: repository initialized at `project/`, branch `main`, no commits yet (first commit pending user confirmation). **Two `.env` files still don't exist** — root `.env` (`NVIDIA_API_KEY`) and `frontend/.env` (`DATABASE_URL`, `BETTER_AUTH_SECRET`) — both block their respective next steps (§7, §16). `frontend/node_modules`, `frontend/.next`, `frontend/src/generated/prisma`, and `ai/.venv` are gitignored and not part of version control.
+- **New top-level directory:** `ai-service/` — the internal AI orchestration service (see §3).
+- **`frontend/`**: gained `src/hooks/`, `src/lib/{ai-service-client,mappers,session,api-client,api-helpers,variants,export}.ts`, `src/lib/validations/brief.ts`, `src/app/api/{projects,variants,constraint-taxonomy,generation-runs}/**`, `src/app/projects/[id]/`, `prisma/seed.ts`, `src/proxy.ts` (renamed from `middleware.ts`, DD-017). Lost `src/lib/mock-data.ts`, `src/lib/constraint-taxonomy.ts` (Phase 1 hardcoded version), `src/app/variants/page.tsx` — all deleted, confirmed unreferenced first.
+- **`ai/`**: unchanged this entry — kept as the Milestone 1.1 evaluation harness, not merged into `ai-service/` (deliberate — see DD-016's rationale for keeping them as separate, independently-deployable units).
+
+**Git:** repository at `project/`, branch `main`, still zero commits and no remote (deliberate, post-incident — see §16). Everything in this entry exists only in the working tree; nothing has been committed. `frontend/prisma/migrations/20260712101713_init/` now exists on disk too — the first real migration, applied to the live Supabase database.
+
+**What actually runs right now — both are live, from this session, and fully functional (verified §2, Entry 8):**
+- AI service at `http://localhost:8000` (`MODEL_PROVIDER=mock`, no `.env` needed for this path).
+- Frontend dev server at `http://localhost:3001` (port 3000 was occupied), connected to the real Supabase database via the session-pooler `DATABASE_URL` (DD-021).

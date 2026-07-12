@@ -13,13 +13,16 @@ frontend/.turbo/
 frontend/next-env.d.ts
 *.tsbuildinfo
 
-# --- Python (ai/) ---
+# --- Python (ai/, ai-service/) ---
 ai/.venv/
 ai/**/__pycache__/
 ai/**/*.pyc
 ai/.pytest_cache/
 ai/.mypy_cache/
 ai/.ruff_cache/
+ai-service/.venv/
+ai-service/**/__pycache__/
+ai-service/**/*.pyc
 
 # --- Evaluation outputs (regeneratable, large) ---
 docs/reports/raw/

@@ -12,15 +12,15 @@ import { ArrowRight, Clapperboard, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
-import type { Variant } from "@/lib/types";
+import type { ApiVariant } from "@/lib/types";
 
-const COMPLEXITY_STYLES: Record<Variant["productionComplexity"], string> = {
+const COMPLEXITY_STYLES: Record<ApiVariant["productionComplexity"], string> = {
   low: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
   medium: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
   high: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
 };
 
-export function VariantCard({ variant, index }: { variant: Variant; index: number }) {
+export function VariantCard({ variant, index }: { variant: ApiVariant; index: number }) {
   return (
     <Card className="flex h-full flex-col">
       <CardHeader className="flex flex-row items-start justify-between gap-2">
