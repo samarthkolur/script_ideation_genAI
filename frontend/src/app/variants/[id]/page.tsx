@@ -11,6 +11,8 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExportDialog } from "@/components/export-dialog";
 import { RefinementPanel } from "@/components/refinement-panel";
+import { EmptyState } from "@/components/empty-state";
+import { FadeIn } from "@/components/motion/fade-in";
 import { useVariant } from "@/hooks/use-variants";
 
 export default function VariantDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -31,13 +33,12 @@ export default function VariantDetailPage({ params }: { params: Promise<{ id: st
 
   if (isError || !variant) {
     return (
-      <Card className="border-destructive/40">
-        <CardContent className="flex flex-col items-center gap-3 py-14 text-center">
-          <AlertTriangle className="h-8 w-8 text-destructive" />
-          <p className="text-sm text-muted-foreground">Variant not found, or you don&apos;t have access to it.</p>
-          <Link href="/dashboard" className={buttonVariants({ variant: "secondary" })}>Back to dashboard</Link>
-        </CardContent>
-      </Card>
+      <EmptyState
+        tone="destructive"
+        icon={AlertTriangle}
+        description="Variant not found, or you don't have access to it."
+        action={<Link href="/dashboard" className={buttonVariants({ variant: "secondary" })}>Back to dashboard</Link>}
+      />
     );
   }
 
@@ -45,18 +46,20 @@ export default function VariantDetailPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <Link
-          href={`/projects/${projectId}`}
-          className={buttonVariants({ variant: "ghost", size: "sm", className: "gap-2 text-muted-foreground" })}
-        >
-          <ArrowLeft className="h-4 w-4" /> Back to project
-        </Link>
-        <ExportDialog variant={variant} />
-      </div>
+      <FadeIn>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <Link
+            href={`/projects/${projectId}`}
+            className={buttonVariants({ variant: "ghost", size: "sm", className: "gap-2 text-muted-foreground" })}
+          >
+            <ArrowLeft className="h-4 w-4" /> Back to project
+          </Link>
+          <ExportDialog variant={variant} />
+        </div>
+      </FadeIn>
 
       <div className="grid gap-8 lg:grid-cols-3">
-        <div className="flex flex-col gap-6 lg:col-span-2">
+        <FadeIn delay={0.08} className="flex flex-col gap-6 lg:col-span-2">
           <Card>
             <CardHeader>
               <div className="flex items-start justify-between gap-4">
@@ -104,11 +107,11 @@ export default function VariantDetailPage({ params }: { params: Promise<{ id: st
               </div>
             </CardContent>
           </Card>
-        </div>
+        </FadeIn>
 
-        <div className="flex flex-col gap-6">
+        <FadeIn delay={0.16} className="flex flex-col gap-6">
           <RefinementPanel variantId={variant.id} />
-        </div>
+        </FadeIn>
       </div>
     </div>
   );

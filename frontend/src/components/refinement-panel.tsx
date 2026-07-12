@@ -14,13 +14,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Wand2 } from "lucide-react";
+import { motion } from "motion/react";
+import { Sparkles, Wand2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useRefineVariant } from "@/hooks/use-variants";
 
 const QUICK_SUGGESTIONS = [
@@ -75,7 +75,7 @@ export function RefinementPanel({ variantId }: { variantId: string }) {
             <Badge
               key={s}
               variant="outline"
-              className="cursor-pointer hover:bg-accent"
+              className="cursor-pointer hover:bg-accent hover:border-border-hover"
               onClick={() => applySuggestion(s)}
             >
               {s}
@@ -89,10 +89,18 @@ export function RefinementPanel({ variantId }: { variantId: string }) {
           rows={3}
         />
         {refine.isPending ? (
-          <div className="flex flex-col gap-2">
-            <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-2/3" />
+          <div className="surface-muted flex items-center gap-3 rounded-lg px-4 py-3">
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1.6, repeat: Infinity, ease: "linear" }}
+              className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+            </motion.div>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium">Refining variant…</span>
+              <span className="text-xs text-muted-foreground">Preserving structural core per AC-04</span>
+            </div>
           </div>
         ) : (
           <Button onClick={handleRefine} className="w-fit gap-2">

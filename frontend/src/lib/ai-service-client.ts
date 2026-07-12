@@ -8,6 +8,7 @@
  */
 
 import "server-only";
+import { logger } from "@/lib/logger";
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL ?? "http://localhost:8000";
 const AI_SERVICE_SHARED_SECRET = process.env.AI_SERVICE_SHARED_SECRET;
@@ -55,6 +56,7 @@ class AiServiceError extends Error {
 }
 
 async function callAiService<T>(path: string, body: unknown): Promise<T> {
+  const startedAt = Date.now();
   const response = await fetch(`${AI_SERVICE_URL}${path}`, {
     method: "POST",
     headers: {
@@ -68,10 +70,13 @@ async function callAiService<T>(path: string, body: unknown): Promise<T> {
     // be the real bound.
     cache: "no-store",
   });
+  const durationMs = Date.now() - startedAt;
   if (!response.ok) {
     const detail = await response.text();
+    logger.error({ path, status: response.status, durationMs, detail }, "AI service call failed");
     throw new AiServiceError(`AI service ${path} failed (${response.status}): ${detail}`, response.status);
   }
+  logger.info({ path, durationMs }, "AI service call succeeded");
   return response.json() as Promise<T>;
 }
 

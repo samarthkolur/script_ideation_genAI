@@ -36,6 +36,20 @@ class ChatResult:
     finish_reason: str | None
 
 
+class EmptyChoicesError(RuntimeError):
+    """Raised when NIM returns HTTP 200 with an empty `choices` list.
+
+    Observed directly (Milestone 1.1 full-scale run, see design.md §16/§9):
+    happens under the same backend-degraded conditions that also produce
+    `DEGRADED function cannot be invoked` 400s — sometimes the backend
+    instead returns a nominally-successful response with nothing in it.
+    Previously this surfaced as a raw, unretried `IndexError` from
+    `response.choices[0]`, indistinguishable in the eval report from an
+    actual harness bug. Treated as a transient, retryable failure, same as
+    429/5xx.
+    """
+
+
 class NimClient:
     """Async wrapper for chat completions against NVIDIA NIM."""
 
@@ -88,6 +102,10 @@ class NimClient:
         for attempt in range(_MAX_RETRIES):
             try:
                 response = await self._client.chat.completions.create(**kwargs)
+                if not response.choices:
+                    raise EmptyChoicesError(
+                        f"NIM returned HTTP 200 with an empty choices list for model={model!r}"
+                    )
                 choice = response.choices[0]
                 return ChatResult(
                     model=model,
@@ -98,7 +116,7 @@ class NimClient:
                 if exc.status_code not in (429, 500, 502, 503, 504):
                     raise
                 last_error = exc
-            except APIError as exc:
+            except (APIError, EmptyChoicesError) as exc:
                 last_error = exc
 
             if attempt < _MAX_RETRIES - 1:

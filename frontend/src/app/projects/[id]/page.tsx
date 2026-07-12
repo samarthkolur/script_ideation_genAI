@@ -6,11 +6,13 @@ import { toast } from "sonner";
 import { AlertTriangle, Loader2, RefreshCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VariantCard } from "@/components/variant-card";
 import { VariantCompareTable } from "@/components/variant-compare-table";
+import { EmptyState } from "@/components/empty-state";
+import { FadeIn } from "@/components/motion/fade-in";
+import { StaggerContainer, StaggerItem } from "@/components/motion/stagger";
 import { useProject, useCreateBrief } from "@/hooks/use-projects";
 
 export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
@@ -31,13 +33,12 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
   if (isError || !project) {
     return (
-      <Card className="border-destructive/40">
-        <CardContent className="flex flex-col items-center gap-3 py-14 text-center">
-          <AlertTriangle className="h-8 w-8 text-destructive" />
-          <p className="text-sm text-muted-foreground">Project not found, or you don&apos;t have access to it.</p>
-          <Link href="/dashboard" className={buttonVariants({ variant: "secondary" })}>Back to dashboard</Link>
-        </CardContent>
-      </Card>
+      <EmptyState
+        tone="destructive"
+        icon={AlertTriangle}
+        description="Project not found, or you don't have access to it."
+        action={<Link href="/dashboard" className={buttonVariants({ variant: "secondary" })}>Back to dashboard</Link>}
+      />
     );
   }
 
@@ -70,70 +71,68 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex flex-col gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">{project.title}</h1>
-            {latestRun && (
-              <p className="text-muted-foreground">
-                {latestRun.variants.length} distinct directions for this brief. Every variant respects all
-                8 constraint dimensions simultaneously (FR-02, FR-04).
-              </p>
-            )}
+      <FadeIn>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex flex-col gap-2">
+              <h1 className="text-h1 font-semibold tracking-tight">{project.title}</h1>
+              {latestRun && (
+                <p className="text-muted-foreground">
+                  {latestRun.variants.length} distinct directions for this brief. Every variant respects all
+                  8 constraint dimensions simultaneously (FR-02, FR-04).
+                </p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="gap-2" onClick={handleRegenerate} disabled={createBrief.isPending}>
+                {createBrief.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                Regenerate
+              </Button>
+              <Link href="/create" className={buttonVariants({ variant: "secondary", className: "gap-2" })}>
+                New brief
+              </Link>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" className="gap-2" onClick={handleRegenerate} disabled={createBrief.isPending}>
-              {createBrief.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-              Regenerate
-            </Button>
-            <Link href="/create" className={buttonVariants({ variant: "secondary", className: "gap-2" })}>
-              New brief
-            </Link>
-          </div>
+          {latestBrief && (
+            <div className="surface-muted flex flex-wrap items-center gap-2 rounded-lg p-3 text-sm">
+              {latestBrief.genres.map((g) => <Badge key={g}>{g}</Badge>)}
+              <span className="text-muted-foreground">&middot;</span>
+              <span>{latestBrief.audience}</span>
+              <span className="text-muted-foreground">&middot;</span>
+              <span>{latestBrief.budgetTier}</span>
+              <span className="text-muted-foreground">&middot;</span>
+              <span>{latestBrief.region}</span>
+              <span className="text-muted-foreground">&middot;</span>
+              <span>{latestBrief.runtimeMinutes} min</span>
+              <span className="text-muted-foreground">&middot;</span>
+              <span>{latestBrief.censorshipFramework.toUpperCase()} {latestBrief.censorshipRating}</span>
+            </div>
+          )}
         </div>
-        {latestBrief && (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
-            {latestBrief.genres.map((g) => <Badge key={g}>{g}</Badge>)}
-            <span className="text-muted-foreground">&middot;</span>
-            <span>{latestBrief.audience}</span>
-            <span className="text-muted-foreground">&middot;</span>
-            <span>{latestBrief.budgetTier}</span>
-            <span className="text-muted-foreground">&middot;</span>
-            <span>{latestBrief.region}</span>
-            <span className="text-muted-foreground">&middot;</span>
-            <span>{latestBrief.runtimeMinutes} min</span>
-            <span className="text-muted-foreground">&middot;</span>
-            <span>{latestBrief.censorshipFramework.toUpperCase()} {latestBrief.censorshipRating}</span>
-          </div>
-        )}
-      </div>
+      </FadeIn>
 
-      {!latestRun && (
-        <Card><CardContent className="py-14 text-center text-sm text-muted-foreground">No generation run yet.</CardContent></Card>
-      )}
+      {!latestRun && <EmptyState description="No generation run yet." />}
 
       {latestRun?.status === "generating" && (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-14 text-center">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
-            <p className="text-sm text-muted-foreground">Generating variants — this can take a moment.</p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Loader2}
+          iconClassName="animate-spin"
+          description="Generating variants — this can take a moment."
+        />
       )}
 
       {latestRun?.status === "failed" && (
-        <Card className="border-destructive/40">
-          <CardContent className="flex flex-col items-center gap-3 py-14 text-center">
-            <AlertTriangle className="h-6 w-6 text-destructive" />
-            <p className="text-sm text-muted-foreground">
-              Generation failed{latestRun.errorMessage ? `: ${latestRun.errorMessage}` : "."}
-            </p>
+        <EmptyState
+          tone="destructive"
+          icon={AlertTriangle}
+          description={`Generation failed${latestRun.errorMessage ? `: ${latestRun.errorMessage}` : "."}`}
+          action={
             <Button onClick={handleRegenerate} disabled={createBrief.isPending} className="gap-2">
               {createBrief.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
               Try again
             </Button>
-          </CardContent>
-        </Card>
+          }
+        />
       )}
 
       {latestRun?.status === "complete" && latestRun.variants.length > 0 && (
@@ -143,13 +142,15 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             <TabsTrigger value="compare">Compare</TabsTrigger>
           </TabsList>
           <TabsContent value="cards" className="mt-6">
-            <div className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
+            <StaggerContainer className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
               {latestRun.variants
                 .sort((a, b) => a.index - b.index)
                 .map((variant, i) => (
-                  <VariantCard key={variant.id} variant={variant} index={i} />
+                  <StaggerItem key={variant.id}>
+                    <VariantCard variant={variant} index={i} />
+                  </StaggerItem>
                 ))}
-            </div>
+            </StaggerContainer>
           </TabsContent>
           <TabsContent value="compare" className="mt-6">
             <VariantCompareTable variants={latestRun.variants.sort((a, b) => a.index - b.index)} />

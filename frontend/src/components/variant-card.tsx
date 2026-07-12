@@ -12,13 +12,27 @@ import { ArrowRight, Clapperboard, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { ApiVariant } from "@/lib/types";
 
-const COMPLEXITY_STYLES: Record<ApiVariant["productionComplexity"], string> = {
-  low: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-  medium: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
-  high: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
-};
+// Monochrome tier indicator (DD-024) — complexity is conveyed by how many
+// of three dots are filled, not by color, so it stays legible on the
+// black-and-white palette while still scannable at a glance across a grid.
+const COMPLEXITY_LEVEL: Record<ApiVariant["productionComplexity"], number> = { low: 1, medium: 2, high: 3 };
+
+function ComplexityIndicator({ complexity }: { complexity: ApiVariant["productionComplexity"] }) {
+  const level = COMPLEXITY_LEVEL[complexity];
+  return (
+    <span className="flex items-center gap-1.5 rounded-full border border-border px-2 py-1 text-micro text-muted-foreground">
+      <span className="flex gap-0.5">
+        {[1, 2, 3].map((i) => (
+          <span key={i} className={cn("size-1.5 rounded-full", i <= level ? "bg-foreground" : "bg-border")} />
+        ))}
+      </span>
+      {complexity}
+    </span>
+  );
+}
 
 export function VariantCard({ variant, index }: { variant: ApiVariant; index: number }) {
   return (
@@ -28,9 +42,7 @@ export function VariantCard({ variant, index }: { variant: ApiVariant; index: nu
           <span className="text-xs font-medium text-muted-foreground">Variant {index + 1}</span>
           <CardTitle className="text-base leading-snug font-medium">{variant.logline}</CardTitle>
         </div>
-        <Badge variant="outline" className={COMPLEXITY_STYLES[variant.productionComplexity]}>
-          {variant.productionComplexity} complexity
-        </Badge>
+        <ComplexityIndicator complexity={variant.productionComplexity} />
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-4">
         <div className="flex flex-col gap-2 text-sm">
@@ -47,7 +59,7 @@ export function VariantCard({ variant, index }: { variant: ApiVariant; index: nu
             <Badge key={archetype} variant="secondary">{archetype}</Badge>
           ))}
         </div>
-        <div className="mt-auto flex flex-wrap gap-4 border-t pt-3 text-xs text-muted-foreground">
+        <div className="mt-auto flex flex-wrap gap-4 border-t border-border pt-3 text-xs text-muted-foreground">
           <span className="flex items-center gap-1"><Clapperboard className="h-3.5 w-3.5" /> {variant.estimatedLocations} locations</span>
           <span className="flex items-center gap-1"><Users className="h-3.5 w-3.5" /> {variant.estimatedPrincipalCast} principal cast</span>
           <span>VFX: {variant.vfxLevelUsed}</span>

@@ -31,7 +31,7 @@ const ROWS: { label: string; render: (v: ApiVariant) => React.ReactNode }[] = [
 
 export function VariantCompareTable({ variants }: { variants: ApiVariant[] }) {
   return (
-    <div className="overflow-x-auto rounded-lg border">
+    <div className="surface overflow-x-auto rounded-xl">
       <Table>
         <TableHeader>
           <TableRow>

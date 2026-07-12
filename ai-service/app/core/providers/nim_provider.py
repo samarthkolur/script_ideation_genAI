@@ -28,6 +28,20 @@ _REQUEST_TIMEOUT_SECONDS = 180.0
 _GENERATE_MAX_TOKENS = 8192
 _JUDGE_MAX_TOKENS = 4096
 
+
+class _EmptyChoicesError(RuntimeError):
+    """Raised when NIM returns HTTP 200 with an empty `choices` list.
+
+    Observed directly (design.md §16/§9, Development Log Entry 16): happens
+    under the same backend-degraded conditions that also produce `DEGRADED
+    function cannot be invoked` 400s — sometimes the backend instead
+    returns a nominally-successful response with nothing in it. Previously
+    this surfaced as a raw, unretried `IndexError` from `response.choices[0]`
+    that would 500 a real user's "Generate variants" click with no retry
+    and no clear error. Treated as a transient, retryable failure, same as
+    429/5xx.
+    """
+
 _SYSTEM_PROMPT = (
     "You are a professional script development assistant helping "
     "screenwriters brainstorm plot ideas. You generate original, "
@@ -130,12 +144,16 @@ class NimProvider:
                     max_tokens=max_tokens,
                     response_format={"type": "json_object"},
                 )
+                if not response.choices:
+                    raise _EmptyChoicesError(
+                        f"NIM returned HTTP 200 with an empty choices list for model={self.model_name!r}"
+                    )
                 return response.choices[0].message.content or ""
             except APIStatusError as exc:
                 if exc.status_code not in (400, 429, 500, 502, 503, 504):
                     raise
                 last_error = exc
-            except APIError as exc:
+            except (APIError, _EmptyChoicesError) as exc:
                 last_error = exc
             if attempt < _MAX_RETRIES - 1:
                 await asyncio.sleep(_RETRY_BASE_DELAY_SECONDS * (2**attempt))

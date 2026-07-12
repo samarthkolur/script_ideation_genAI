@@ -49,7 +49,7 @@ export function ExportDialog({ variant }: { variant: ApiVariant }) {
           </DialogDescription>
         </DialogHeader>
         <RadioGroup value={format} onValueChange={(v) => setFormat(v as "pdf" | "text")} className="gap-3">
-          <label className="flex cursor-pointer items-center gap-3 rounded-md border p-3 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5">
+          <label className="flex cursor-pointer items-center gap-3 rounded-md border border-border p-3 transition-colors duration-150 has-[[data-state=checked]]:border-foreground has-[[data-state=checked]]:bg-accent">
             <RadioGroupItem value="pdf" />
             <File className="h-4 w-4 text-muted-foreground" />
             <div className="flex flex-col">
@@ -57,7 +57,7 @@ export function ExportDialog({ variant }: { variant: ApiVariant }) {
               <span className="text-xs text-muted-foreground">Best for sharing with collaborators</span>
             </div>
           </label>
-          <label className="flex cursor-pointer items-center gap-3 rounded-md border p-3 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5">
+          <label className="flex cursor-pointer items-center gap-3 rounded-md border border-border p-3 transition-colors duration-150 has-[[data-state=checked]]:border-foreground has-[[data-state=checked]]:bg-accent">
             <RadioGroupItem value="text" />
             <FileText className="h-4 w-4 text-muted-foreground" />
             <div className="flex flex-col">
